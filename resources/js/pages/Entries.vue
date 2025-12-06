@@ -444,6 +444,10 @@ const paymentCurrentYear = ref(new Date().getFullYear());
 const paymentDatepickerRef = ref<HTMLElement | null>(null);
 const paymentDateInputRef = ref<HTMLElement | null>(null);
 
+// Save and add new state
+const saveAndAddNew = ref(false);
+const addEntryFormRef = ref<any>(null);
+
 // Open add entry modal
 const openAddModal = () => {
     clearEdit();
@@ -897,11 +901,21 @@ watch(paymentDate, (newDate) => {
                         </DialogDescription>
                     </DialogHeader>
                     <Form
+                        ref="addEntryFormRef"
                         :key="'create'"
                         v-bind="storeEntry.form()"
                         :reset-on-success="true"
                         :preserve-scroll="true"
-                        @success="() => { clearCategory(); closeAddModal(); }"
+                        @success="() => { 
+                            clearCategory(); 
+                            if (saveAndAddNew.value) {
+                                // Reset form but keep modal open
+                                clearEdit();
+                                saveAndAddNew.value = false;
+                            } else {
+                                closeAddModal();
+                            }
+                        }"
                         class="grid gap-4 sm:grid-cols-2"
                         v-slot="{ errors, processing }"
                     >
@@ -1153,10 +1167,25 @@ watch(paymentDate, (newDate) => {
                                 </Button>
                             </DialogClose>
                             <Button
+                                type="button"
+                                variant="outline"
+                                :disabled="processing"
+                                @click="() => { 
+                                    saveAndAddNew.value = true; 
+                                    // Find and click the submit button
+                                    const submitButton = addEntryFormRef?.$el?.querySelector('button[type=submit]') as HTMLButtonElement;
+                                    if (submitButton) {
+                                        submitButton.click();
+                                    }
+                                }"
+                            >
+                                {{ processing ? 'Saving...' : 'Save and Add New' }}
+                            </Button>
+                            <Button
                                 type="submit"
                                 :disabled="processing"
                             >
-                                {{ processing ? 'Adding...' : 'Add Entry' }}
+                                {{ processing ? 'Saving...' : 'Save' }}
                             </Button>
                         </DialogFooter>
                     </Form>
