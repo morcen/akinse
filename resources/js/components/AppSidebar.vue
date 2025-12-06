@@ -11,10 +11,10 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
-import { entries, dashboard } from '@/routes';
+import { categories, entries, dashboard } from '@/routes';
 import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/vue3';
-import { BookOpen, Folder, LayoutGrid, Wallet } from 'lucide-vue-next';
+import { BookOpen, Folder, LayoutGrid, Tag, Wallet } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const mainNavItems: NavItem[] = [
@@ -27,6 +27,11 @@ const mainNavItems: NavItem[] = [
         title: 'Entries',
         href: entries(),
         icon: Wallet,
+    },
+    {
+        title: 'Categories',
+        href: categories(),
+        icon: Tag,
     },
 ];
 
