@@ -416,7 +416,7 @@ const getTypeBadgeColor = (type: 'income' | 'expense') => {
 };
 
 // Form state for editing
-const formType = ref('');
+const formType = ref('expense'); // Default to expense
 const formAmount = ref('');
 const formDescription = ref('');
 
@@ -477,7 +477,7 @@ const clearEdit = () => {
     categoryInput.value = '';
     selectedCategoryId.value = null;
     dateInput.value = formatDateLocal(new Date());
-    formType.value = '';
+    formType.value = 'expense'; // Reset to expense default
     formAmount.value = '';
     formDescription.value = '';
     showDatepicker.value = false;
@@ -907,17 +907,37 @@ watch(paymentDate, (newDate) => {
                     >
                         <div class="grid gap-2 sm:col-span-1">
                             <Label for="add-type">Type</Label>
-                            <select
-                                id="add-type"
+                            <div class="inline-flex gap-1 rounded-lg border border-input bg-background p-1">
+                                <button
+                                    type="button"
+                                    @click="formType = 'expense'"
+                                    :class="[
+                                        'flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                                        formType === 'expense'
+                                            ? 'bg-red-500 text-white shadow-sm'
+                                            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                                    ]"
+                                >
+                                    Expense
+                                </button>
+                                <button
+                                    type="button"
+                                    @click="formType = 'income'"
+                                    :class="[
+                                        'flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                                        formType === 'income'
+                                            ? 'bg-green-500 text-white shadow-sm'
+                                            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                                    ]"
+                                >
+                                    Income
+                                </button>
+                            </div>
+                            <input
+                                type="hidden"
                                 name="type"
-                                v-model="formType"
-                                required
-                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                <option value="">Select type</option>
-                                <option value="income">Income</option>
-                                <option value="expense">Expense</option>
-                            </select>
+                                :value="formType"
+                            />
                             <InputError :message="errors.type" />
                         </div>
 
@@ -936,7 +956,7 @@ watch(paymentDate, (newDate) => {
                             <InputError :message="errors.amount" />
                         </div>
 
-                        <div class="relative grid gap-2 sm:col-span-2">
+                        <div class="relative grid gap-2 sm:col-span-1">
                             <Label for="add-category">Category</Label>
                             <div class="relative">
                                 <Input
@@ -983,7 +1003,7 @@ watch(paymentDate, (newDate) => {
                             <InputError :message="errors.category_name || errors.category_id" />
                         </div>
 
-                        <div class="relative grid gap-2 sm:col-span-2">
+                        <div class="relative grid gap-2 sm:col-span-1">
                             <Label for="add-date">Date</Label>
                             <div class="relative">
                                 <Input
