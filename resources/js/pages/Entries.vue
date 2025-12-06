@@ -10,6 +10,11 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -18,7 +23,7 @@ import { destroy, store as storeEntry, update as updateEntry } from '@/routes/en
 import { type BreadcrumbItem } from '@/types';
 import { Form, Head, router } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref, watch, withDefaults } from 'vue';
-import { Edit, Trash2, Filter, X, Plus, CreditCard } from 'lucide-vue-next';
+import { Edit, Trash2, Filter, X, Plus, CreditCard, ChevronDown } from 'lucide-vue-next';
 
 interface Entry {
     id: number;
@@ -116,6 +121,14 @@ const hasActiveFilters = computed(() => {
            filterDateFrom.value !== '' ||
            filterDateTo.value !== '';
 });
+
+// Filter collapsible state - open by default if filters are active
+const filtersOpen = ref(
+    (props.filters?.type || '') !== '' ||
+    (props.filters?.category_id || '') !== '' ||
+    (props.filters?.date_from || '') !== '' ||
+    (props.filters?.date_to || '') !== ''
+);
 
 // Sync filter refs when props change (e.g., browser back/forward)
 watch(() => props.filters, (newFilters) => {
@@ -659,86 +672,103 @@ watch(paymentDate, (newDate) => {
                         Manage your income and expenses
                     </p>
                 </div>
-                <Button @click="openAddModal">
-                    <Plus class="h-4 w-4 mr-2" />
-                    Add Entry
-                </Button>
             </div>
 
-            <!-- Filters -->
-            <div
-                class="rounded-xl border border-sidebar-border/70 bg-card p-4 dark:border-sidebar-border"
-            >
-                <div class="flex items-center gap-2 mb-4">
-                    <Filter class="h-4 w-4 text-muted-foreground" />
-                    <h2 class="text-sm font-medium">Filters</h2>
-                    <div class="flex-1"></div>
-                    <Button
-                        v-if="hasActiveFilters"
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        @click="clearFilters"
-                        class="h-8 text-xs"
-                    >
-                        <X class="h-3 w-3 mr-1" />
-                        Clear Filters
+            <div class="relative flex flex-col gap-2">
+                <div class="flex items-center justify-between gap-2">
+                    <Button @click="openAddModal">
+                        <Plus class="h-4 w-4 mr-2" />
+                        Add Entry
                     </Button>
-                </div>
-                <div class="grid gap-4 md:grid-cols-4">
-                    <div class="grid gap-2">
-                        <Label for="filter-type">Type</Label>
-                        <select
-                            id="filter-type"
-                            v-model="filterType"
-                            @change="applyFilters"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    
+                    <!-- Filters Collapsible -->
+                    <Collapsible v-model:open="filtersOpen" class="flex items-center gap-2">
+                        <CollapsibleTrigger as-child>
+                            <Button variant="outline" type="button">
+                                <Filter class="h-4 w-4 mr-2" />
+                                Filters
+                                <ChevronDown
+                                    class="h-4 w-4 ml-2 transition-transform duration-200"
+                                    :class="{ 'rotate-180': filtersOpen }"
+                                />
+                            </Button>
+                        </CollapsibleTrigger>
+                        <Button
+                            v-if="hasActiveFilters"
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            @click="clearFilters"
+                            class="h-9 text-xs"
                         >
-                            <option value="">All Types</option>
-                            <option value="income">Income</option>
-                            <option value="expense">Expense</option>
-                        </select>
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="filter-category">Category</Label>
-                        <select
-                            id="filter-category"
-                            v-model="filterCategoryId"
-                            @change="applyFilters"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                            <option value="">All Categories</option>
-                            <option
-                                v-for="category in categories"
-                                :key="category.id"
-                                :value="category.id"
-                            >
-                                {{ category.name }}
-                            </option>
-                        </select>
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="filter-date-from">Date From</Label>
-                        <Input
-                            id="filter-date-from"
-                            type="date"
-                            v-model="filterDateFrom"
-                            @change="applyFilters"
-                        />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="filter-date-to">Date To</Label>
-                        <Input
-                            id="filter-date-to"
-                            type="date"
-                            v-model="filterDateTo"
-                            @change="applyFilters"
-                        />
-                    </div>
+                            <X class="h-3 w-3 mr-1" />
+                            Clear
+                        </Button>
+                    </Collapsible>
                 </div>
+                
+                <Collapsible v-model:open="filtersOpen" class="w-full">
+                    <CollapsibleContent class="mt-0">
+                        <div
+                            class="rounded-xl border border-sidebar-border/70 bg-card p-4 dark:border-sidebar-border"
+                        >
+                            <div class="grid gap-4 md:grid-cols-4">
+                                <div class="grid gap-2">
+                                    <Label for="filter-type">Type</Label>
+                                    <select
+                                        id="filter-type"
+                                        v-model="filterType"
+                                        @change="applyFilters"
+                                        class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        <option value="">All Types</option>
+                                        <option value="income">Income</option>
+                                        <option value="expense">Expense</option>
+                                    </select>
+                                </div>
+
+                                <div class="grid gap-2">
+                                    <Label for="filter-category">Category</Label>
+                                    <select
+                                        id="filter-category"
+                                        v-model="filterCategoryId"
+                                        @change="applyFilters"
+                                        class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        <option value="">All Categories</option>
+                                        <option
+                                            v-for="category in categories"
+                                            :key="category.id"
+                                            :value="category.id"
+                                        >
+                                            {{ category.name }}
+                                        </option>
+                                    </select>
+                                </div>
+
+                                <div class="grid gap-2">
+                                    <Label for="filter-date-from">Date From</Label>
+                                    <Input
+                                        id="filter-date-from"
+                                        type="date"
+                                        v-model="filterDateFrom"
+                                        @change="applyFilters"
+                                    />
+                                </div>
+
+                                <div class="grid gap-2">
+                                    <Label for="filter-date-to">Date To</Label>
+                                    <Input
+                                        id="filter-date-to"
+                                        type="date"
+                                        v-model="filterDateTo"
+                                        @change="applyFilters"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </CollapsibleContent>
+                </Collapsible>
             </div>
 
 
