@@ -140,6 +140,7 @@ watch(() => props.filters, (newFilters) => {
     }
 }, { immediate: true });
 
+
 // Autocomplete state for category
 const categoryInput = ref('');
 const showSuggestions = ref(false);
@@ -351,11 +352,27 @@ const handleDatepickerMouseDown = (event: MouseEvent) => {
 onMounted(() => {
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('mousedown', handlePaymentDatepickerClickOutside);
+    
+    // Watch for Inertia navigation completion to reopen modal after "Save and Add New"
+    routerUnsubscribe = router.on('finish', () => {
+        // Check if we should reopen modal after redirect (for "Save and Add New")
+        if (sessionStorage.getItem('saveAndAddNew') === 'true') {
+            sessionStorage.removeItem('saveAndAddNew');
+            // Small delay to ensure DOM is updated
+            setTimeout(() => {
+                clearEdit();
+                addDialogOpen.value = true;
+            }, 100);
+        }
+    });
 });
 
 onUnmounted(() => {
     document.removeEventListener('mousedown', handleClickOutside);
     document.removeEventListener('mousedown', handlePaymentDatepickerClickOutside);
+    if (routerUnsubscribe) {
+        routerUnsubscribe();
+    }
 });
 
 const formatCurrency = (amount: string) => {
@@ -447,12 +464,37 @@ const paymentDateInputRef = ref<HTMLElement | null>(null);
 // Save and add new state
 const saveAndAddNew = ref(false);
 const addEntryFormRef = ref<any>(null);
+let routerUnsubscribe: (() => void) | null = null;
+
+// Handle save and add new button click
+const handleSaveAndAddNew = () => {
+    saveAndAddNew.value = true;
+    // Store in sessionStorage to persist across redirect
+    sessionStorage.setItem('saveAndAddNew', 'true');
+    // Find and click the submit button
+    const submitButton = addEntryFormRef.value?.$el?.querySelector('button[type=submit]') as HTMLButtonElement;
+    if (submitButton) {
+        submitButton.click();
+    }
+};
 
 // Open add entry modal
 const openAddModal = () => {
     clearEdit();
     addDialogOpen.value = true;
 };
+
+// Check if we should reopen modal after page load (for "Save and Add New")
+onMounted(() => {
+    if (sessionStorage.getItem('saveAndAddNew') === 'true') {
+        sessionStorage.removeItem('saveAndAddNew');
+        // Small delay to ensure page is fully loaded
+        setTimeout(() => {
+            clearEdit();
+            addDialogOpen.value = true;
+        }, 100);
+    }
+});
 
 // Populate form with entry data for editing
 const editEntry = (entry: Entry) => {
@@ -908,13 +950,12 @@ watch(paymentDate, (newDate) => {
                         :preserve-scroll="true"
                         @success="() => { 
                             clearCategory(); 
-                            if (saveAndAddNew.value) {
-                                // Reset form but keep modal open
-                                clearEdit();
-                                saveAndAddNew.value = false;
-                            } else {
+                            // Note: If saveAndAddNew is true, the modal will reopen via onMounted
+                            // after the redirect completes, so we don't need to handle it here
+                            if (!saveAndAddNew.value) {
                                 closeAddModal();
                             }
+                            saveAndAddNew.value = false;
                         }"
                         class="grid gap-4 sm:grid-cols-2"
                         v-slot="{ errors, processing }"
@@ -1170,14 +1211,7 @@ watch(paymentDate, (newDate) => {
                                 type="button"
                                 variant="outline"
                                 :disabled="processing"
-                                @click="() => { 
-                                    saveAndAddNew.value = true; 
-                                    // Find and click the submit button
-                                    const submitButton = addEntryFormRef?.$el?.querySelector('button[type=submit]') as HTMLButtonElement;
-                                    if (submitButton) {
-                                        submitButton.click();
-                                    }
-                                }"
+                                @click="handleSaveAndAddNew"
                             >
                                 {{ processing ? 'Saving...' : 'Save and Add New' }}
                             </Button>
