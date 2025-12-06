@@ -31,10 +31,10 @@ import {
 import UserMenuContent from '@/components/UserMenuContent.vue';
 import { getInitials } from '@/composables/useInitials';
 import { toUrl, urlIsActive } from '@/lib/utils';
-import { dashboard } from '@/routes';
+import { entries, dashboard } from '@/routes';
 import type { BreadcrumbItem, NavItem } from '@/types';
 import { InertiaLinkProps, Link, usePage } from '@inertiajs/vue3';
-import { BookOpen, Folder, LayoutGrid, Menu, Search } from 'lucide-vue-next';
+import { BookOpen, Folder, LayoutGrid, Menu, Search, Wallet } from 'lucide-vue-next';
 import { computed } from 'vue';
 
 interface Props {
@@ -65,6 +65,11 @@ const mainNavItems: NavItem[] = [
         title: 'Dashboard',
         href: dashboard(),
         icon: LayoutGrid,
+    },
+    {
+        title: 'Entries',
+        href: entries(),
+        icon: Wallet,
     },
 ];
 
@@ -269,13 +274,13 @@ const rightNavItems: NavItem[] = [
         </div>
 
         <div
-            v-if="props.breadcrumbs.length > 1"
+            v-if="props.breadcrumbs && props.breadcrumbs.length > 1"
             class="flex w-full border-b border-sidebar-border/70"
         >
             <div
                 class="mx-auto flex h-12 w-full items-center justify-start px-4 text-neutral-500 md:max-w-7xl"
             >
-                <Breadcrumbs :breadcrumbs="breadcrumbs" />
+                <Breadcrumbs :breadcrumbs="props.breadcrumbs" />
             </div>
         </div>
     </div>
