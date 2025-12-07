@@ -833,11 +833,6 @@ watch(paymentDate, (newDate) => {
                                 <th
                                     class="px-4 py-3 text-left text-sm font-medium text-muted-foreground"
                                 >
-                                    Type
-                                </th>
-                                <th
-                                    class="px-4 py-3 text-left text-sm font-medium text-muted-foreground"
-                                >
                                     Category
                                 </th>
                                 <th
@@ -877,16 +872,6 @@ watch(paymentDate, (newDate) => {
                             >
                                 <td class="px-4 py-3 text-sm">
                                     {{ formatDate(entry.date) }}
-                                </td>
-                                <td class="px-4 py-3">
-                                    <span
-                                        :class="[
-                                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize',
-                                            getTypeBadgeColor(entry.type),
-                                        ]"
-                                    >
-                                        {{ entry.type }}
-                                    </span>
                                 </td>
                                 <td class="px-4 py-3 text-sm">
                                     {{ entry.category?.name ?? 'Uncategorized' }}
