@@ -15,6 +15,12 @@ import {
     CollapsibleContent,
     CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -23,7 +29,7 @@ import { destroy, store as storeEntry, update as updateEntry } from '@/routes/en
 import { type BreadcrumbItem } from '@/types';
 import { Form, Head, router } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref, watch, withDefaults } from 'vue';
-import { Edit, Trash2, Filter, X, Plus, CreditCard, ChevronDown } from 'lucide-vue-next';
+import { Edit, Trash2, Filter, X, Plus, CreditCard, ChevronDown, Layers } from 'lucide-vue-next';
 
 interface Entry {
     id: number;
@@ -130,6 +136,9 @@ const filtersOpen = ref(
     (props.filters?.date_to || '') !== ''
 );
 
+// Grouping state
+const groupBy = ref<'date' | 'category' | null>(null);
+
 // Sync filter refs when props change (e.g., browser back/forward)
 watch(() => props.filters, (newFilters) => {
     if (newFilters) {
@@ -145,6 +154,8 @@ watch(() => props.filters, (newFilters) => {
 const categoryInput = ref('');
 const showSuggestions = ref(false);
 const selectedCategoryId = ref<number | null>(null);
+const categoryInputRef = ref<HTMLElement | null>(null);
+const categoryDropdownRef = ref<HTMLElement | null>(null);
 
 // Datepicker helper functions
 // Helper to format date as YYYY-MM-DD in local time (not UTC)
@@ -344,6 +355,24 @@ const handleClickOutside = (event: MouseEvent) => {
     }
 };
 
+// Handle click outside to close category dropdown
+const handleCategoryDropdownClickOutside = (event: MouseEvent) => {
+    if (!showSuggestions.value) return;
+    
+    const target = event.target as HTMLElement;
+    const dropdownElement = categoryDropdownRef.value;
+    const inputElement = categoryInputRef.value;
+    
+    if (
+        dropdownElement &&
+        inputElement &&
+        !dropdownElement.contains(target) &&
+        !inputElement.contains(target)
+    ) {
+        showSuggestions.value = false;
+    }
+};
+
 // Prevent blur when clicking inside datepicker
 const handleDatepickerMouseDown = (event: MouseEvent) => {
     event.preventDefault();
@@ -352,6 +381,7 @@ const handleDatepickerMouseDown = (event: MouseEvent) => {
 onMounted(() => {
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('mousedown', handlePaymentDatepickerClickOutside);
+    document.addEventListener('mousedown', handleCategoryDropdownClickOutside);
     
     // Watch for Inertia navigation completion to reopen modal after "Save and Add New"
     routerUnsubscribe = router.on('finish', () => {
@@ -370,6 +400,7 @@ onMounted(() => {
 onUnmounted(() => {
     document.removeEventListener('mousedown', handleClickOutside);
     document.removeEventListener('mousedown', handlePaymentDatepickerClickOutside);
+    document.removeEventListener('mousedown', handleCategoryDropdownClickOutside);
     if (routerUnsubscribe) {
         routerUnsubscribe();
     }
@@ -388,6 +419,16 @@ const formatDate = (date: string | null | undefined) => {
     }
     
     try {
+        const year = parseDateLocal(date).getFullYear();
+        
+        // check if year is current year
+        if (year === new Date().getFullYear()) {
+            return parseDateLocal(date).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+            });
+        }
+        
         return parseDateLocal(date).toLocaleDateString('en-US', {
             year: 'numeric',
             month: 'short',
@@ -702,6 +743,76 @@ watch(paymentDate, (newDate) => {
         paymentCurrentYear.value = date.getFullYear();
     }
 });
+
+// Grouped entries computed property
+interface GroupedEntry {
+    groupKey: string;
+    groupLabel: string;
+    entries: Entry[];
+}
+
+const groupedEntries = computed<GroupedEntry[] | null>(() => {
+    if (!groupBy.value || !props.entries?.data || props.entries.data.length === 0) {
+        return null;
+    }
+
+    const entries = props.entries.data;
+    const groups = new Map<string, Entry[]>();
+
+    // Helper function to sort entries by date ascending
+    const sortEntriesByDate = (entries: Entry[]): Entry[] => {
+        return [...entries].sort((a, b) => {
+            const dateA = parseDateLocal(a.date);
+            const dateB = parseDateLocal(b.date);
+            return dateA.getTime() - dateB.getTime();
+        });
+    };
+
+    if (groupBy.value === 'date') {
+        // Group by date
+        entries.forEach((entry) => {
+            const dateKey = entry.date || 'No Date';
+            if (!groups.has(dateKey)) {
+                groups.set(dateKey, []);
+            }
+            groups.get(dateKey)!.push(entry);
+        });
+
+        // Convert to array and sort by date ascending (oldest first)
+        return Array.from(groups.entries())
+            .map(([dateKey, entries]) => ({
+                groupKey: dateKey,
+                groupLabel: formatDate(dateKey),
+                entries: sortEntriesByDate(entries),
+            }))
+            .sort((a, b) => {
+                // Sort by date ascending (oldest first)
+                const dateA = parseDateLocal(a.groupKey);
+                const dateB = parseDateLocal(b.groupKey);
+                return dateA.getTime() - dateB.getTime();
+            });
+    } else if (groupBy.value === 'category') {
+        // Group by category
+        entries.forEach((entry) => {
+            const categoryKey = entry.category?.name || 'Uncategorized';
+            if (!groups.has(categoryKey)) {
+                groups.set(categoryKey, []);
+            }
+            groups.get(categoryKey)!.push(entry);
+        });
+
+        // Convert to array and sort by category name, then sort entries within each group by date
+        return Array.from(groups.entries())
+            .map(([categoryKey, entries]) => ({
+                groupKey: categoryKey,
+                groupLabel: categoryKey,
+                entries: sortEntriesByDate(entries),
+            }))
+            .sort((a, b) => a.groupLabel.localeCompare(b.groupLabel));
+    }
+
+    return null;
+});
 </script>
 
 <template>
@@ -727,30 +838,60 @@ watch(paymentDate, (newDate) => {
                         Add Entry
                     </Button>
                     
-                    <!-- Filters Collapsible -->
-                    <Collapsible v-model:open="filtersOpen" class="flex items-center gap-2">
-                        <CollapsibleTrigger as-child>
-                            <Button variant="outline" type="button">
-                                <Filter class="h-4 w-4 mr-2" />
-                                Filters
-                                <ChevronDown
-                                    class="h-4 w-4 ml-2 transition-transform duration-200"
-                                    :class="{ 'rotate-180': filtersOpen }"
-                                />
+                    <div class="flex items-center gap-2">
+                        <!-- Group Button -->
+                        <DropdownMenu>
+                            <DropdownMenuTrigger as-child>
+                                <Button variant="outline" type="button">
+                                    <Layers class="h-4 w-4 mr-2" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                    @click="groupBy = 'date'"
+                                    :class="{ 'bg-accent': groupBy === 'date' }"
+                                >
+                                    Group by date
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    @click="groupBy = 'category'"
+                                    :class="{ 'bg-accent': groupBy === 'category' }"
+                                >
+                                    Group by category
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    v-if="groupBy !== null"
+                                    @click="groupBy = null"
+                                >
+                                    Remove grouping
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                        
+                        <!-- Filters Collapsible -->
+                        <Collapsible v-model:open="filtersOpen" class="flex items-center gap-2">
+                            <CollapsibleTrigger as-child>
+                                <Button variant="outline" type="button">
+                                    <Filter class="h-4 w-4 mr-2" />
+                                    <ChevronDown
+                                        class="h-4 w-4 ml-2 transition-transform duration-200"
+                                        :class="{ 'rotate-180': filtersOpen }"
+                                    />
+                                </Button>
+                            </CollapsibleTrigger>
+                            <Button
+                                v-if="hasActiveFilters"
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                @click="clearFilters"
+                                class="h-9 text-xs"
+                            >
+                                <X class="h-3 w-3 mr-1" />
+                                Clear
                             </Button>
-                        </CollapsibleTrigger>
-                        <Button
-                            v-if="hasActiveFilters"
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            @click="clearFilters"
-                            class="h-9 text-xs"
-                        >
-                            <X class="h-3 w-3 mr-1" />
-                            Clear
-                        </Button>
-                    </Collapsible>
+                        </Collapsible>
+                    </div>
                 </div>
                 
                 <Collapsible v-model:open="filtersOpen" class="w-full">
@@ -826,11 +967,13 @@ watch(paymentDate, (newDate) => {
                         <thead class="border-b border-sidebar-border/70 bg-muted/50">
                             <tr>
                                 <th
+                                    v-if="groupBy !== 'date'"
                                     class="px-4 py-3 text-left text-sm font-medium text-muted-foreground"
                                 >
                                     Date
                                 </th>
                                 <th
+                                    v-if="groupBy !== 'category'"
                                     class="px-4 py-3 text-left text-sm font-medium text-muted-foreground"
                                 >
                                     Category
@@ -848,71 +991,148 @@ watch(paymentDate, (newDate) => {
                             </tr>
                         </thead>
                         <tbody>
+                            <!-- No entries message -->
                             <tr
                                 v-if="!entries?.data || entries.data.length === 0"
                                 class="border-b border-sidebar-border/70"
                             >
                                 <td
-                                    colspan="5"
+                                    :colspan="groupBy === 'date' || groupBy === 'category' ? 3 : 4"
                                     class="px-4 py-8 text-center text-sm text-muted-foreground"
                                 >
                                     No entries found. Start by adding your first
                                     entry.
                                 </td>
                             </tr>
-                            <tr
-                                v-for="entry in entries?.data || []"
-                                :key="entry.id"
-                                :class="[
-                                    'border-b border-sidebar-border/70 transition-colors',
-                                    isFullyPaid(entry)
-                                        ? 'bg-muted/30 opacity-75'
-                                        : 'hover:bg-muted/50',
-                                ]"
-                            >
-                                <td class="px-4 py-3 text-sm">
-                                    {{ formatDate(entry.date) }}
-                                </td>
-                                <td class="px-4 py-3 text-sm">
-                                    {{ entry.category?.name ?? 'Uncategorized' }}
-                                </td>
-                                <td
+                            
+                            <!-- Grouped entries -->
+                            <template v-if="groupedEntries">
+                                <template v-for="(group, groupIndex) in groupedEntries" :key="`group-${group.groupKey}-${groupIndex}`">
+                                    <!-- Group header -->
+                                    <tr class="bg-muted/30 border-b-2 border-sidebar-border/70">
+                                        <td
+                                            :colspan="groupBy === 'date' || groupBy === 'category' ? 3 : 4"
+                                            class="px-4 py-3 text-sm font-semibold text-foreground"
+                                        >
+                                            {{ group.groupLabel }}
+                                            <span class="ml-2 text-xs font-normal text-muted-foreground">
+                                                ({{ group.entries.length }} {{ group.entries.length === 1 ? 'entry' : 'entries' }})
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <!-- Group entries -->
+                                    <tr
+                                        v-for="entry in group.entries"
+                                        :key="entry.id"
+                                        :class="[
+                                            'border-b border-sidebar-border/70 transition-colors',
+                                            isFullyPaid(entry)
+                                                ? 'bg-muted/30 opacity-75'
+                                                : 'hover:bg-muted/50',
+                                        ]"
+                                    >
+                                        <td v-if="groupBy !== 'date'" class="px-4 py-3 text-sm">
+                                            {{ formatDate(entry.date) }}
+                                        </td>
+                                        <td v-if="groupBy !== 'category'" class="px-4 py-3 text-sm">
+                                            {{ entry.category?.name ?? 'Uncategorized' }}
+                                        </td>
+                                        <td
+                                            :class="[
+                                                'px-4 py-3 text-right text-sm font-medium',
+                                                getTypeColor(entry.type),
+                                            ]"
+                                        >
+                                            {{ formatRemainingAmount(entry) }}
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <div class="flex items-center justify-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    @click="openPaymentModal(entry)"
+                                                    class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                    title="Record payment"
+                                                >
+                                                    <CreditCard class="h-4 w-4" />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    @click="editEntry(entry)"
+                                                    class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                    title="Edit entry"
+                                                >
+                                                    <Edit class="h-4 w-4" />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    @click="confirmDelete(entry)"
+                                                    class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                                    title="Delete entry"
+                                                >
+                                                    <Trash2 class="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </template>
+                            
+                            <!-- Ungrouped entries (default view) -->
+                            <template v-else>
+                                <tr
+                                    v-for="entry in entries?.data || []"
+                                    :key="entry.id"
                                     :class="[
-                                        'px-4 py-3 text-right text-sm font-medium',
-                                        getTypeColor(entry.type),
+                                        'border-b border-sidebar-border/70 transition-colors',
+                                        isFullyPaid(entry)
+                                            ? 'bg-muted/30 opacity-75'
+                                            : 'hover:bg-muted/50',
                                     ]"
                                 >
-                                    {{ formatRemainingAmount(entry) }}
-                                </td>
-                                <td class="px-4 py-3">
-                                    <div class="flex items-center justify-center gap-2">
-                                        <button
-                                            type="button"
-                                            @click="openPaymentModal(entry)"
-                                            class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                            title="Record payment"
-                                        >
-                                            <CreditCard class="h-4 w-4" />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            @click="editEntry(entry)"
-                                            class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                            title="Edit entry"
-                                        >
-                                            <Edit class="h-4 w-4" />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            @click="confirmDelete(entry)"
-                                            class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                                            title="Delete entry"
-                                        >
-                                            <Trash2 class="h-4 w-4" />
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
+                                    <td v-if="groupBy !== 'date'" class="px-4 py-3 text-sm">
+                                        {{ formatDate(entry.date) }}
+                                    </td>
+                                    <td v-if="groupBy !== 'category'" class="px-4 py-3 text-sm">
+                                        {{ entry.category?.name ?? 'Uncategorized' }}
+                                    </td>
+                                    <td
+                                        :class="[
+                                            'px-4 py-3 text-right text-sm font-medium',
+                                            getTypeColor(entry.type),
+                                        ]"
+                                    >
+                                        {{ formatRemainingAmount(entry) }}
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center justify-center gap-2">
+                                            <button
+                                                type="button"
+                                                @click="openPaymentModal(entry)"
+                                                class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                title="Record payment"
+                                            >
+                                                <CreditCard class="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                @click="editEntry(entry)"
+                                                class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                title="Edit entry"
+                                            >
+                                                <Edit class="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                @click="confirmDelete(entry)"
+                                                class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                                title="Delete entry"
+                                            >
+                                                <Trash2 class="h-4 w-4" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
                         </tbody>
                     </table>
                 </div>
@@ -1000,11 +1220,12 @@ watch(paymentDate, (newDate) => {
                             <Label for="add-category">Category</Label>
                             <div class="relative">
                                 <Input
+                                    ref="categoryInputRef"
                                     id="add-category"
                                     v-model="categoryInput"
                                     @input="handleCategoryInput"
                                     @focus="showSuggestions = true"
-                                    @blur="setTimeout(() => (showSuggestions = false), 200)"
+                                    @blur="showSuggestions = false"
                                     required
                                     placeholder="Type to search or create new category"
                                     autocomplete="off"
@@ -1025,7 +1246,9 @@ watch(paymentDate, (newDate) => {
                                 />
                                 <!-- Suggestions dropdown -->
                                 <div
+                                    ref="categoryDropdownRef"
                                     v-if="showSuggestions && filteredCategories.length > 0"
+                                    @mousedown.prevent
                                     class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-sidebar-border/70 bg-card shadow-lg dark:border-sidebar-border"
                                 >
                                     <ul class="py-1">
@@ -1053,6 +1276,7 @@ watch(paymentDate, (newDate) => {
                                     :model-value="formattedDate"
                                     @focus="showDatepicker = true"
                                     @click="showDatepicker = true"
+                                    @blur="showDatepicker = false"
                                     required
                                     placeholder="Select date"
                                     autocomplete="off"
@@ -1265,11 +1489,12 @@ watch(paymentDate, (newDate) => {
                             <Label for="edit-category">Category</Label>
                             <div class="relative">
                                 <Input
+                                    ref="categoryInputRef"
                                     id="edit-category"
                                     v-model="categoryInput"
                                     @input="handleCategoryInput"
                                     @focus="showSuggestions = true"
-                                    @blur="setTimeout(() => (showSuggestions = false), 200)"
+                                    @blur="showSuggestions = false"
                                     required
                                     placeholder="Type to search or create new category"
                                     autocomplete="off"
@@ -1290,7 +1515,9 @@ watch(paymentDate, (newDate) => {
                                 />
                                 <!-- Suggestions dropdown -->
                                 <div
+                                    ref="categoryDropdownRef"
                                     v-if="showSuggestions && filteredCategories.length > 0"
+                                    @mousedown.prevent
                                     class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-sidebar-border/70 bg-card shadow-lg dark:border-sidebar-border"
                                 >
                                     <ul class="py-1">
@@ -1318,6 +1545,7 @@ watch(paymentDate, (newDate) => {
                                     :model-value="formattedDate"
                                     @focus="showDatepicker = true"
                                     @click="showDatepicker = true"
+                                    @blur="showDatepicker = false"
                                     required
                                     placeholder="Select date"
                                     autocomplete="off"
@@ -1573,6 +1801,7 @@ watch(paymentDate, (newDate) => {
                                     :model-value="paymentFormattedDate"
                                     @focus="paymentDatepickerOpen = true"
                                     @click="paymentDatepickerOpen = true"
+                                    @blur="paymentDatepickerOpen = false"
                                     required
                                     placeholder="Select date"
                                     autocomplete="off"
