@@ -29,7 +29,7 @@ import { destroy, store as storeEntry, update as updateEntry } from '@/routes/en
 import { type BreadcrumbItem } from '@/types';
 import { Form, Head, router } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref, watch, withDefaults } from 'vue';
-import { Edit, Trash2, Filter, X, Plus, CreditCard, ChevronDown, Layers } from 'lucide-vue-next';
+import { Filter, X, Plus, CreditCard, ChevronDown, Layers } from 'lucide-vue-next';
 
 interface Entry {
     id: number;
@@ -452,6 +452,46 @@ const isFullyPaid = (entry: Entry): boolean => {
     return getRemainingAmount(entry) === 0;
 };
 
+// Check if entry is partially paid
+const isPartiallyPaid = (entry: Entry): boolean => {
+    const totalPaid = parseFloat(String(entry.total_paid || 0));
+    return totalPaid > 0 && !isFullyPaid(entry);
+};
+
+// Get row background color class based on payment status and due date
+const getRowColorClass = (entry: Entry): string => {
+    // Fully paid is green
+    if (isFullyPaid(entry)) {
+        return 'bg-green-50 dark:bg-green-950/20';
+    }
+    
+    // Partially paid is yellow
+    if (isPartiallyPaid(entry)) {
+        return 'bg-yellow-50 dark:bg-yellow-950/20';
+    }
+    
+    // Check due date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueDate = new Date(entry.date);
+    dueDate.setHours(0, 0, 0, 0);
+    
+    const daysUntilDue = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    
+    // Overdue is red
+    if (daysUntilDue < 0) {
+        return 'bg-red-50 dark:bg-red-950/20';
+    }
+    
+    // Due in 3 days or less is orange
+    if (daysUntilDue <= 3) {
+        return 'bg-orange-50 dark:bg-orange-950/20';
+    }
+    
+    // Everything else uses default background
+    return '';
+};
+
 // Format remaining amount with sign (only show sign if amount is not zero)
 const formatRemainingAmount = (entry: Entry): string => {
     const remaining = getRemainingAmount(entry);
@@ -485,6 +525,10 @@ const isEditing = computed(() => editingEntry.value !== null);
 // Modal state
 const addDialogOpen = ref(false);
 const editDialogOpen = ref(false);
+const viewDialogOpen = ref(false);
+
+// View state
+const viewingEntry = ref<Entry | null>(null);
 
 // Delete confirmation dialog state
 const deleteDialogOpen = ref(false);
@@ -537,6 +581,50 @@ onMounted(() => {
     }
 });
 
+// Open view modal
+const viewEntry = (entry: Entry) => {
+    viewingEntry.value = entry;
+    viewDialogOpen.value = true;
+};
+
+// Open edit modal from view modal
+const openEditFromView = () => {
+    if (!viewingEntry.value) return;
+    
+    // Close view modal first
+    viewDialogOpen.value = false;
+    
+    // Populate form with entry data for editing
+    editingEntry.value = viewingEntry.value;
+    categoryInput.value = viewingEntry.value.category?.name ?? '';
+    selectedCategoryId.value = viewingEntry.value.category?.id ?? null;
+    
+    // Ensure date is in YYYY-MM-DD format and update datepicker month/year
+    const entryDate = viewingEntry.value.date ? parseDateLocal(viewingEntry.value.date) : new Date();
+    dateInput.value = formatDateLocal(entryDate);
+    currentMonth.value = entryDate.getMonth();
+    currentYear.value = entryDate.getFullYear();
+    
+    formType.value = viewingEntry.value.type;
+    formAmount.value = viewingEntry.value.amount;
+    formDescription.value = viewingEntry.value.description ?? '';
+    showDatepicker.value = false;
+    
+    // Open edit modal
+    editDialogOpen.value = true;
+};
+
+// Open payment modal from view modal
+const openPaymentFromView = () => {
+    if (!viewingEntry.value) return;
+    
+    // Close view modal first
+    viewDialogOpen.value = false;
+    
+    // Open payment modal
+    openPaymentModal(viewingEntry.value);
+};
+
 // Populate form with entry data for editing
 const editEntry = (entry: Entry) => {
     editingEntry.value = entry;
@@ -574,6 +662,12 @@ const clearEdit = () => {
 const closeAddModal = () => {
     addDialogOpen.value = false;
     clearEdit();
+};
+
+// Close view modal
+const closeViewModal = () => {
+    viewDialogOpen.value = false;
+    viewingEntry.value = null;
 };
 
 // Close edit modal
@@ -1024,11 +1118,11 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                                     <tr
                                         v-for="entry in group.entries"
                                         :key="entry.id"
+                                        @click="viewEntry(entry)"
                                         :class="[
-                                            'border-b border-sidebar-border/70 transition-colors',
-                                            isFullyPaid(entry)
-                                                ? 'bg-muted/30 opacity-75'
-                                                : 'hover:bg-muted/50',
+                                            'border-b border-sidebar-border/70 transition-colors cursor-pointer',
+                                            getRowColorClass(entry),
+                                            !isFullyPaid(entry) && 'hover:opacity-80',
                                         ]"
                                     >
                                         <td v-if="groupBy !== 'date'" class="px-4 py-3 text-sm">
@@ -1049,27 +1143,11 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                                             <div class="flex items-center justify-center gap-2">
                                                 <button
                                                     type="button"
-                                                    @click="openPaymentModal(entry)"
+                                                    @click.stop="openPaymentModal(entry)"
                                                     class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                                     title="Record payment"
                                                 >
                                                     <CreditCard class="h-4 w-4" />
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    @click="editEntry(entry)"
-                                                    class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                                    title="Edit entry"
-                                                >
-                                                    <Edit class="h-4 w-4" />
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    @click="confirmDelete(entry)"
-                                                    class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                                                    title="Delete entry"
-                                                >
-                                                    <Trash2 class="h-4 w-4" />
                                                 </button>
                                             </div>
                                         </td>
@@ -1082,11 +1160,11 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                                 <tr
                                     v-for="entry in entries?.data || []"
                                     :key="entry.id"
+                                    @click="viewEntry(entry)"
                                     :class="[
-                                        'border-b border-sidebar-border/70 transition-colors',
-                                        isFullyPaid(entry)
-                                            ? 'bg-muted/30 opacity-75'
-                                            : 'hover:bg-muted/50',
+                                        'border-b border-sidebar-border/70 transition-colors cursor-pointer',
+                                        getRowColorClass(entry),
+                                        !isFullyPaid(entry) && 'hover:opacity-80',
                                     ]"
                                 >
                                     <td v-if="groupBy !== 'date'" class="px-4 py-3 text-sm">
@@ -1107,27 +1185,11 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                                         <div class="flex items-center justify-center gap-2">
                                             <button
                                                 type="button"
-                                                @click="openPaymentModal(entry)"
+                                                @click.stop="openPaymentModal(entry)"
                                                 class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                                 title="Record payment"
                                             >
                                                 <CreditCard class="h-4 w-4" />
-                                            </button>
-                                            <button
-                                                type="button"
-                                                @click="editEntry(entry)"
-                                                class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                                title="Edit entry"
-                                            >
-                                                <Edit class="h-4 w-4" />
-                                            </button>
-                                            <button
-                                                type="button"
-                                                @click="confirmDelete(entry)"
-                                                class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                                                title="Delete entry"
-                                            >
-                                                <Trash2 class="h-4 w-4" />
                                             </button>
                                         </div>
                                     </td>
@@ -1435,6 +1497,146 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                 </DialogContent>
             </Dialog>
 
+            <!-- View Entry Dialog -->
+            <Dialog v-model:open="viewDialogOpen">
+                <DialogContent class="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Entry Details</DialogTitle>
+                        <DialogDescription>
+                            View entry information
+                        </DialogDescription>
+                    </DialogHeader>
+                    
+                    <div v-if="viewingEntry" class="grid gap-4">
+                        <!-- Entry Information -->
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div class="grid gap-2">
+                                <Label class="text-xs text-muted-foreground">Type</Label>
+                                <div>
+                                    <span
+                                        :class="[
+                                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
+                                            getTypeBadgeColor(viewingEntry.type),
+                                        ]"
+                                    >
+                                        {{ viewingEntry.type === 'income' ? 'Income' : 'Expense' }}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="grid gap-2">
+                                <Label class="text-xs text-muted-foreground">Amount</Label>
+                                <div
+                                    :class="[
+                                        'text-lg font-semibold',
+                                        getTypeColor(viewingEntry.type),
+                                    ]"
+                                >
+                                    {{ formatCurrency(viewingEntry.amount) }}
+                                </div>
+                            </div>
+
+                            <div class="grid gap-2">
+                                <Label class="text-xs text-muted-foreground">Category</Label>
+                                <div class="text-sm font-medium">
+                                    {{ viewingEntry.category?.name ?? 'Uncategorized' }}
+                                </div>
+                            </div>
+
+                            <div class="grid gap-2">
+                                <Label class="text-xs text-muted-foreground">Date</Label>
+                                <div class="text-sm font-medium">
+                                    {{ formatDate(viewingEntry.date) }}
+                                </div>
+                            </div>
+
+                            <div
+                                v-if="viewingEntry.description"
+                                class="grid gap-2 sm:col-span-2"
+                            >
+                                <Label class="text-xs text-muted-foreground">Description</Label>
+                                <div class="text-sm">
+                                    {{ viewingEntry.description }}
+                                </div>
+                            </div>
+
+                            <!-- Payment Information -->
+                            <div class="grid gap-2 sm:col-span-2">
+                                <Label class="text-xs text-muted-foreground">Payment Status</Label>
+                                <div class="rounded-lg border border-sidebar-border/70 bg-muted/50 p-4 dark:border-sidebar-border">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <div class="text-sm font-medium">Total Amount</div>
+                                            <div
+                                                :class="[
+                                                    'text-lg font-semibold',
+                                                    getTypeColor(viewingEntry.type),
+                                                ]"
+                                            >
+                                                {{ formatCurrency(viewingEntry.amount) }}
+                                            </div>
+                                        </div>
+                                        <div class="text-center">
+                                            <div class="text-sm font-medium">Total Paid</div>
+                                            <div class="text-lg font-semibold">
+                                                {{ formatCurrency(String(viewingEntry.total_paid || 0)) }}
+                                            </div>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="text-sm font-medium">Remaining</div>
+                                            <div
+                                                :class="[
+                                                    'text-lg font-semibold',
+                                                    getRemainingAmount(viewingEntry) === 0
+                                                        ? 'text-muted-foreground'
+                                                        : getTypeColor(viewingEntry.type),
+                                                ]"
+                                            >
+                                                {{ formatRemainingAmount(viewingEntry) }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div
+                                        v-if="isFullyPaid(viewingEntry)"
+                                        class="mt-2 text-center text-xs text-green-600 dark:text-green-400"
+                                    >
+                                        ✓ Fully Paid
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <DialogClose as-child>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                @click="closeViewModal"
+                            >
+                                Close
+                            </Button>
+                        </DialogClose>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            @click="openPaymentFromView"
+                            :disabled="!viewingEntry || isFullyPaid(viewingEntry!)"
+                        >
+                            <CreditCard class="h-4 w-4 mr-2" />
+                            Record Payment
+                        </Button>
+                        <Button
+                            type="button"
+                            @click="openEditFromView"
+                            :disabled="!viewingEntry"
+                        >
+                            Edit Entry
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <!-- Edit Entry Dialog -->
             <Dialog v-model:open="editDialogOpen">
                 <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -1676,21 +1878,33 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                         </div>
 
                         <DialogFooter class="sm:col-span-2">
-                            <DialogClose as-child>
+                            <div class="flex w-full items-center justify-between">
                                 <Button
                                     type="button"
-                                    variant="outline"
-                                    @click="closeEditModal"
+                                    variant="destructive"
+                                    @click="() => { confirmDelete(editingEntry!); closeEditModal(); }"
+                                    :disabled="processing"
                                 >
-                                    Cancel
+                                    Delete
                                 </Button>
-                            </DialogClose>
-                            <Button
-                                type="submit"
-                                :disabled="processing"
-                            >
-                                {{ processing ? 'Updating...' : 'Update Entry' }}
-                            </Button>
+                                <div class="flex gap-2">
+                                    <DialogClose as-child>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            @click="closeEditModal"
+                                        >
+                                            Cancel
+                                        </Button>
+                                    </DialogClose>
+                                    <Button
+                                        type="submit"
+                                        :disabled="processing"
+                                    >
+                                        {{ processing ? 'Updating...' : 'Update Entry' }}
+                                    </Button>
+                                </div>
+                            </div>
                         </DialogFooter>
                     </Form>
                 </DialogContent>
