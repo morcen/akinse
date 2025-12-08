@@ -19,6 +19,12 @@ Route::middleware(['auth'])->group(function () {
         ->middleware(['verified'])
         ->name('entries');
     
+    // Grouped entries route must be defined BEFORE apiResource to avoid route model binding conflicts
+    Route::get('entries/grouped/{group?}', [EntryController::class, 'grouped'])
+        ->middleware(['verified'])
+        ->where('group', 'date|category')
+        ->name('entries.grouped');
+    
     Route::apiResource('entries', EntryController::class)->except(['index']);
     Route::post('entry-payments', [\App\Http\Controllers\EntryPaymentController::class, 'store'])
         ->name('entry-payments.store');
@@ -26,6 +32,10 @@ Route::middleware(['auth'])->group(function () {
     Route::get('categories', [CategoryController::class, 'categories'])
         ->middleware(['verified'])
         ->name('categories');
+    
+    // Search route must be defined BEFORE apiResource to avoid route model binding conflicts
+    Route::get('categories/search', [CategoryController::class, 'search'])
+        ->name('categories.search');
     
     Route::apiResource('categories', CategoryController::class)->except(['index']);
     Route::get('categories/{category}/entries-and-payments', [CategoryController::class, 'entriesAndPayments'])

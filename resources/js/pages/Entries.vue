@@ -929,7 +929,12 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                                             {{ formatDate(entry.date) }}
                                         </td>
                                         <td v-if="groupBy !== 'category'" class="px-4 py-3 text-sm">
-                                            {{ entry.category?.name ?? 'Uncategorized' }}
+                                            <span
+                                                :class="[
+                                                    'inline-flex items-center rounded-full px-2.5 py-0.5 font-medium capitalize',
+                                                    getTypeBadgeColor(entry.type),
+                                                ]"
+                                            >{{ entry.category?.name ?? 'Uncategorized' }}</span>
                                         </td>
                                         <td
                                             :class="[

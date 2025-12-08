@@ -30,7 +30,11 @@ class EntryPaymentController extends Controller
             return response()->json($payment, 201);
         }
 
-        // For Inertia requests, redirect back to entries page to refresh the table
-        return redirect()->route('entries');
+        // For Inertia requests, redirect back to the previous page (or entries page as fallback)
+        $previousUrl = $request->header('Referer');
+        if ($previousUrl && str_contains($previousUrl, '/entries/grouped')) {
+            return redirect($previousUrl)->with('success', 'Payment recorded successfully');
+        }
+        return redirect()->route('entries')->with('success', 'Payment recorded successfully');
     }
 }

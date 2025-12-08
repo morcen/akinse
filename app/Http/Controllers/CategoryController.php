@@ -151,6 +151,27 @@ class CategoryController extends Controller
     }
 
     /**
+     * Search categories by query string.
+     */
+    public function search(Request $request): JsonResponse
+    {
+        $query = $request->get('q', '');
+        
+        // Only search if query is more than 2 characters
+        if (strlen($query) < 3) {
+            return response()->json([]);
+        }
+        
+        $categories = Category::where('user_id', $request->user()->id)
+            ->where('name', 'ILIKE', '%' . $query . '%')
+            ->orderBy('name')
+            ->limit(20)
+            ->get(['id', 'name']);
+        
+        return response()->json($categories);
+    }
+
+    /**
      * Get all entries and payments for a category, combined and sorted by date.
      */
     public function entriesAndPayments(Request $request, Category $category): JsonResponse

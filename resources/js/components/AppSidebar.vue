@@ -12,6 +12,7 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { categories, entries, dashboard } from '@/routes';
+import entriesRoutes from '@/routes/entries';
 import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/vue3';
 import { BookOpen, Folder, LayoutGrid, Tag, Wallet } from 'lucide-vue-next';
@@ -27,6 +28,16 @@ const mainNavItems: NavItem[] = [
         title: 'Entries',
         href: entries(),
         icon: Wallet,
+        items: [
+            {
+                title: 'Grouped by Date',
+                href: entriesRoutes.grouped({ group: 'date' }),
+            },
+            {
+                title: 'Grouped by Categories',
+                href: entriesRoutes.grouped({ group: 'category' }),
+            },
+        ],
     },
     {
         title: 'Categories',
