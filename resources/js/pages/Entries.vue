@@ -594,7 +594,33 @@ interface GroupedEntry {
     groupKey: string;
     groupLabel: string;
     entries: Entry[];
+    totalPayable: number;
+    totalPayment: number;
+    totalRemaining: number;
 }
+
+// Helper function to calculate totals for a group of entries
+const calculateGroupTotals = (entries: Entry[]) => {
+    let totalPayable = 0;
+    let totalPayment = 0;
+    let totalRemaining = 0;
+
+    entries.forEach((entry) => {
+        const amount = parseFloat(entry.amount);
+        const paid = parseFloat(String(entry.total_paid || 0));
+        const remaining = getRemainingAmount(entry);
+
+        totalPayable += amount;
+        totalPayment += paid;
+        totalRemaining += remaining;
+    });
+
+    return {
+        totalPayable,
+        totalPayment,
+        totalRemaining,
+    };
+};
 
 const groupedEntries = computed<GroupedEntry[] | null>(() => {
     if (!groupBy.value || !props.entries?.data || props.entries.data.length === 0) {
@@ -625,11 +651,16 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
 
         // Convert to array and sort by date ascending (oldest first)
         return Array.from(groups.entries())
-            .map(([dateKey, entries]) => ({
-                groupKey: dateKey,
-                groupLabel: formatDate(dateKey),
-                entries: sortEntriesByDate(entries),
-            }))
+            .map(([dateKey, entries]) => {
+                const sortedEntries = sortEntriesByDate(entries);
+                const totals = calculateGroupTotals(sortedEntries);
+                return {
+                    groupKey: dateKey,
+                    groupLabel: formatDate(dateKey),
+                    entries: sortedEntries,
+                    ...totals,
+                };
+            })
             .sort((a, b) => {
                 // Sort by date ascending (oldest first)
                 const dateA = parseDateLocal(a.groupKey);
@@ -648,11 +679,16 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
 
         // Convert to array and sort by category name, then sort entries within each group by date
         return Array.from(groups.entries())
-            .map(([categoryKey, entries]) => ({
-                groupKey: categoryKey,
-                groupLabel: categoryKey,
-                entries: sortEntriesByDate(entries),
-            }))
+            .map(([categoryKey, entries]) => {
+                const sortedEntries = sortEntriesByDate(entries);
+                const totals = calculateGroupTotals(sortedEntries);
+                return {
+                    groupKey: categoryKey,
+                    groupLabel: categoryKey,
+                    entries: sortedEntries,
+                    ...totals,
+                };
+            })
             .sort((a, b) => a.groupLabel.localeCompare(b.groupLabel));
     }
 
@@ -859,10 +895,23 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                                             :colspan="groupBy === 'date' || groupBy === 'category' ? 3 : 4"
                                             class="px-4 py-3 text-sm font-semibold text-foreground"
                                         >
-                                            {{ group.groupLabel }}
-                                            <span class="ml-2 text-xs font-normal text-muted-foreground">
-                                                ({{ group.entries.length }} {{ group.entries.length === 1 ? 'entry' : 'entries' }})
-                                            </span>
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center gap-2">
+                                                    {{ group.groupLabel }}
+                                                    <span class="ml-2 text-xs font-normal text-muted-foreground">
+                                                        ({{ group.entries.length }} {{ group.entries.length === 1 ? 'entry' : 'entries' }})
+                                                    </span>
+                                                </div>
+                                                <div class="flex items-center gap-2 text-xs flex-col">
+                                                    <div class="flex items-center justify-end gap-1 text-muted-foreground">
+                                                        Payable: <span class="text-red-600 dark:text-red-400">{{ formatCurrency(String(group.totalPayable)) }}</span>
+                                                    </div>
+                                                    <div class="flex items-center gap-1 text-muted-foreground">
+                                                        Paid: <span class="text-green-600 dark:text-green-400">{{ formatCurrency(String(group.totalPayment)) }}</span></div>
+                                                    <div class="flex items-center gap-1 text-muted-foreground">
+                                                        Remaining: <span :class="group.totalRemaining > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'">{{ formatCurrency(String(group.totalRemaining)) }}</span></div>
+                                                </div>
+                                            </div>
                                         </td>
                                     </tr>
                                     <!-- Group entries -->
@@ -888,7 +937,7 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                                                 getAmountColor(entry),
                                             ]"
                                         >
-                                            {{ formatRemainingAmount(entry) }}
+                                            {{ formatCurrency(String(entry.amount)) }}
                                         </td>
                                         <td class="px-4 py-3">
                                             <div class="flex items-center justify-center gap-2">
@@ -935,7 +984,7 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                                             getAmountColor(entry),
                                         ]"
                                     >
-                                        {{ formatRemainingAmount(entry) }}
+                                        {{ formatCurrency(entry.amount) }}
                                     </td>
                                     <td class="px-4 py-3">
                                         <div class="flex items-center justify-center gap-2">
