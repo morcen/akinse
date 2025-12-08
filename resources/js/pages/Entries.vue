@@ -1,15 +1,5 @@
 <script setup lang="ts">
-import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
 import {
     Collapsible,
     CollapsibleContent,
@@ -25,11 +15,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { entries as entriesRoute } from '@/routes';
-import { destroy, store as storeEntry, update as updateEntry } from '@/routes/entries';
+import { destroy } from '@/routes/entries';
 import { type BreadcrumbItem } from '@/types';
-import { Form, Head, router } from '@inertiajs/vue3';
-import { computed, onMounted, onUnmounted, ref, watch, withDefaults } from 'vue';
+import { Head, router } from '@inertiajs/vue3';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Filter, X, Plus, CreditCard, ChevronDown, Layers } from 'lucide-vue-next';
+import AddEntryDialog from '@/components/AddEntryDialog.vue';
+import ViewEntryDialog from '@/components/ViewEntryDialog.vue';
+import EditEntryDialog from '@/components/EditEntryDialog.vue';
+import DeleteEntryDialog from '@/components/DeleteEntryDialog.vue';
+import RecordPaymentDialog from '@/components/RecordPaymentDialog.vue';
 
 interface Entry {
     id: number;
@@ -378,11 +373,9 @@ const handleDatepickerMouseDown = (event: MouseEvent) => {
     event.preventDefault();
 };
 
+let routerUnsubscribe: (() => void) | null = null;
+
 onMounted(() => {
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('mousedown', handlePaymentDatepickerClickOutside);
-    document.addEventListener('mousedown', handleCategoryDropdownClickOutside);
-    
     // Watch for Inertia navigation completion to reopen modal after "Save and Add New"
     routerUnsubscribe = router.on('finish', () => {
         // Check if we should reopen modal after redirect (for "Save and Add New")
@@ -390,17 +383,22 @@ onMounted(() => {
             sessionStorage.removeItem('saveAndAddNew');
             // Small delay to ensure DOM is updated
             setTimeout(() => {
-                clearEdit();
                 addDialogOpen.value = true;
             }, 100);
         }
     });
+    
+    // Check if we should reopen modal after page load (for "Save and Add New")
+    if (sessionStorage.getItem('saveAndAddNew') === 'true') {
+        sessionStorage.removeItem('saveAndAddNew');
+        // Small delay to ensure page is fully loaded
+        setTimeout(() => {
+            addDialogOpen.value = true;
+        }, 100);
+    }
 });
 
 onUnmounted(() => {
-    document.removeEventListener('mousedown', handleClickOutside);
-    document.removeEventListener('mousedown', handlePaymentDatepickerClickOutside);
-    document.removeEventListener('mousedown', handleCategoryDropdownClickOutside);
     if (routerUnsubscribe) {
         routerUnsubscribe();
     }
@@ -460,9 +458,12 @@ const isPartiallyPaid = (entry: Entry): boolean => {
 
 // Get row background color class based on payment status and due date
 const getRowColorClass = (entry: Entry): string => {
+    if (entry.type === 'income') {
+        return '';
+    }
     // Fully paid is green
     if (isFullyPaid(entry)) {
-        return 'bg-green-50 dark:bg-green-950/20';
+        return 'bg-green-50 dark:bg-green-950/20 text-green-600 dark:text-green-400';
     }
     
     // Partially paid is yellow
@@ -501,10 +502,12 @@ const formatRemainingAmount = (entry: Entry): string => {
     return formatCurrency(String(remaining));
 };
 
-const getTypeColor = (type: 'income' | 'expense') => {
-    return type === 'income'
+const getAmountColor = (entry: Entry) => {
+    return entry.type === 'income'
         ? 'text-green-600 dark:text-green-400'
-        : 'text-red-600 dark:text-red-400';
+        : isFullyPaid(entry) 
+            ? 'text-green-600 dark:text-green-400' 
+            : 'text-red-600 dark:text-red-400';
 };
 
 const getTypeBadgeColor = (type: 'income' | 'expense') => {
@@ -513,73 +516,23 @@ const getTypeBadgeColor = (type: 'income' | 'expense') => {
         : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
 };
 
-// Form state for editing
-const formType = ref('expense'); // Default to expense
-const formAmount = ref('');
-const formDescription = ref('');
-
-// Edit state
-const editingEntry = ref<Entry | null>(null);
-const isEditing = computed(() => editingEntry.value !== null);
-
 // Modal state
 const addDialogOpen = ref(false);
 const editDialogOpen = ref(false);
 const viewDialogOpen = ref(false);
-
-// View state
-const viewingEntry = ref<Entry | null>(null);
-
-// Delete confirmation dialog state
 const deleteDialogOpen = ref(false);
-const entryToDelete = ref<Entry | null>(null);
-
-// Payment modal state
 const paymentDialogOpen = ref(false);
+
+// Entry state
+const viewingEntry = ref<Entry | null>(null);
+const editingEntry = ref<Entry | null>(null);
+const entryToDelete = ref<Entry | null>(null);
 const entryForPayment = ref<Entry | null>(null);
-const paymentAmount = ref('');
-const paymentDate = ref(formatDateLocal(new Date()));
-const paymentNotes = ref('');
-const paymentDatepickerOpen = ref(false);
-const paymentCurrentMonth = ref(new Date().getMonth());
-const paymentCurrentYear = ref(new Date().getFullYear());
-const paymentDatepickerRef = ref<HTMLElement | null>(null);
-const paymentDateInputRef = ref<HTMLElement | null>(null);
-
-// Save and add new state
-const saveAndAddNew = ref(false);
-const addEntryFormRef = ref<any>(null);
-let routerUnsubscribe: (() => void) | null = null;
-
-// Handle save and add new button click
-const handleSaveAndAddNew = () => {
-    saveAndAddNew.value = true;
-    // Store in sessionStorage to persist across redirect
-    sessionStorage.setItem('saveAndAddNew', 'true');
-    // Find and click the submit button
-    const submitButton = addEntryFormRef.value?.$el?.querySelector('button[type=submit]') as HTMLButtonElement;
-    if (submitButton) {
-        submitButton.click();
-    }
-};
 
 // Open add entry modal
 const openAddModal = () => {
-    clearEdit();
     addDialogOpen.value = true;
 };
-
-// Check if we should reopen modal after page load (for "Save and Add New")
-onMounted(() => {
-    if (sessionStorage.getItem('saveAndAddNew') === 'true') {
-        sessionStorage.removeItem('saveAndAddNew');
-        // Small delay to ensure page is fully loaded
-        setTimeout(() => {
-            clearEdit();
-            addDialogOpen.value = true;
-        }, 100);
-    }
-});
 
 // Open view modal
 const viewEntry = (entry: Entry) => {
@@ -591,26 +544,8 @@ const viewEntry = (entry: Entry) => {
 const openEditFromView = () => {
     if (!viewingEntry.value) return;
     
-    // Close view modal first
     viewDialogOpen.value = false;
-    
-    // Populate form with entry data for editing
     editingEntry.value = viewingEntry.value;
-    categoryInput.value = viewingEntry.value.category?.name ?? '';
-    selectedCategoryId.value = viewingEntry.value.category?.id ?? null;
-    
-    // Ensure date is in YYYY-MM-DD format and update datepicker month/year
-    const entryDate = viewingEntry.value.date ? parseDateLocal(viewingEntry.value.date) : new Date();
-    dateInput.value = formatDateLocal(entryDate);
-    currentMonth.value = entryDate.getMonth();
-    currentYear.value = entryDate.getFullYear();
-    
-    formType.value = viewingEntry.value.type;
-    formAmount.value = viewingEntry.value.amount;
-    formDescription.value = viewingEntry.value.description ?? '';
-    showDatepicker.value = false;
-    
-    // Open edit modal
     editDialogOpen.value = true;
 };
 
@@ -618,62 +553,15 @@ const openEditFromView = () => {
 const openPaymentFromView = () => {
     if (!viewingEntry.value) return;
     
-    // Close view modal first
     viewDialogOpen.value = false;
-    
-    // Open payment modal
-    openPaymentModal(viewingEntry.value);
+    entryForPayment.value = viewingEntry.value;
+    paymentDialogOpen.value = true;
 };
 
-// Populate form with entry data for editing
+// Open edit modal directly
 const editEntry = (entry: Entry) => {
     editingEntry.value = entry;
-    categoryInput.value = entry.category?.name ?? '';
-    selectedCategoryId.value = entry.category?.id ?? null;
-    
-    // Ensure date is in YYYY-MM-DD format and update datepicker month/year
-    const entryDate = entry.date ? parseDateLocal(entry.date) : new Date();
-    dateInput.value = formatDateLocal(entryDate);
-    currentMonth.value = entryDate.getMonth();
-    currentYear.value = entryDate.getFullYear();
-    
-    formType.value = entry.type;
-    formAmount.value = entry.amount;
-    formDescription.value = entry.description ?? '';
-    showDatepicker.value = false;
-    
-    // Open edit modal
     editDialogOpen.value = true;
-};
-
-// Clear edit state
-const clearEdit = () => {
-    editingEntry.value = null;
-    categoryInput.value = '';
-    selectedCategoryId.value = null;
-    dateInput.value = formatDateLocal(new Date());
-    formType.value = 'expense'; // Reset to expense default
-    formAmount.value = '';
-    formDescription.value = '';
-    showDatepicker.value = false;
-};
-
-// Close add modal
-const closeAddModal = () => {
-    addDialogOpen.value = false;
-    clearEdit();
-};
-
-// Close view modal
-const closeViewModal = () => {
-    viewDialogOpen.value = false;
-    viewingEntry.value = null;
-};
-
-// Close edit modal
-const closeEditModal = () => {
-    editDialogOpen.value = false;
-    clearEdit();
 };
 
 // Open delete confirmation dialog
@@ -698,145 +586,8 @@ const handleDelete = () => {
 // Open payment modal
 const openPaymentModal = (entry: Entry) => {
     entryForPayment.value = entry;
-    
-    // Calculate remaining amount (entry amount - total paid)
-    const entryAmount = parseFloat(entry.amount);
-    const totalPaid = parseFloat(String(entry.total_paid || 0));
-    const remainingAmount = Math.max(0, entryAmount - totalPaid);
-    
-    paymentAmount.value = remainingAmount > 0 ? remainingAmount.toFixed(2) : '';
-    paymentDate.value = formatDateLocal(new Date());
-    paymentNotes.value = '';
-    paymentCurrentMonth.value = new Date().getMonth();
-    paymentCurrentYear.value = new Date().getFullYear();
-    paymentDatepickerOpen.value = false;
     paymentDialogOpen.value = true;
 };
-
-// Close payment modal
-const closePaymentModal = () => {
-    paymentDialogOpen.value = false;
-    entryForPayment.value = null;
-    paymentAmount.value = '';
-    paymentDate.value = formatDateLocal(new Date());
-    paymentNotes.value = '';
-    paymentDatepickerOpen.value = false;
-};
-
-// Payment datepicker functions
-const getPaymentCalendarDays = computed(() => {
-    const daysInMonth = getDaysInMonth(paymentCurrentMonth.value, paymentCurrentYear.value);
-    const firstDay = getFirstDayOfMonth(paymentCurrentMonth.value, paymentCurrentYear.value);
-    const days: (number | null)[] = [];
-    
-    // Add empty cells for days before the first day of the month
-    for (let i = 0; i < firstDay; i++) {
-        days.push(null);
-    }
-    
-    // Add days of the month
-    for (let i = 1; i <= daysInMonth; i++) {
-        days.push(i);
-    }
-    
-    return days;
-});
-
-const selectPaymentDate = (day: number | null) => {
-    if (day === null) return;
-    
-    const selectedDate = new Date(paymentCurrentYear.value, paymentCurrentMonth.value, day);
-    paymentDate.value = formatDateLocal(selectedDate);
-    paymentDatepickerOpen.value = false;
-};
-
-const paymentFormattedDate = computed(() => {
-    if (!paymentDate.value) return '';
-    const date = parseDateLocal(paymentDate.value);
-    return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-    });
-});
-
-const isPaymentDateSelected = (day: number | null) => {
-    if (day === null || !paymentDate.value) return false;
-    const selected = parseDateLocal(paymentDate.value);
-    return (
-        day === selected.getDate() &&
-        paymentCurrentMonth.value === selected.getMonth() &&
-        paymentCurrentYear.value === selected.getFullYear()
-    );
-};
-
-const isPaymentDateToday = (day: number | null) => {
-    if (day === null) return false;
-    const today = new Date();
-    return (
-        day === today.getDate() &&
-        paymentCurrentMonth.value === today.getMonth() &&
-        paymentCurrentYear.value === today.getFullYear()
-    );
-};
-
-const previousPaymentMonth = () => {
-    if (paymentCurrentMonth.value === 0) {
-        paymentCurrentMonth.value = 11;
-        paymentCurrentYear.value--;
-    } else {
-        paymentCurrentMonth.value--;
-    }
-};
-
-const nextPaymentMonth = () => {
-    if (paymentCurrentMonth.value === 11) {
-        paymentCurrentMonth.value = 0;
-        paymentCurrentYear.value++;
-    } else {
-        paymentCurrentMonth.value++;
-    }
-};
-
-const goToPaymentToday = () => {
-    const today = new Date();
-    paymentCurrentMonth.value = today.getMonth();
-    paymentCurrentYear.value = today.getFullYear();
-    paymentDate.value = formatDateLocal(today);
-    paymentDatepickerOpen.value = false;
-};
-
-// Handle click outside to close payment datepicker
-const handlePaymentDatepickerClickOutside = (event: MouseEvent) => {
-    if (!paymentDatepickerOpen.value) return;
-    
-    const target = event.target as HTMLElement;
-    const datepickerElement = paymentDatepickerRef.value;
-    const inputElement = paymentDateInputRef.value;
-    
-    if (
-        datepickerElement &&
-        inputElement &&
-        !datepickerElement.contains(target) &&
-        !inputElement.contains(target)
-    ) {
-        paymentDatepickerOpen.value = false;
-    }
-};
-
-// Prevent blur when clicking inside payment datepicker
-const handlePaymentDatepickerMouseDown = (event: MouseEvent) => {
-    event.preventDefault();
-};
-
-// Watch payment date to update month/year
-watch(paymentDate, (newDate) => {
-    if (newDate) {
-        const date = parseDateLocal(newDate);
-        paymentCurrentMonth.value = date.getMonth();
-        paymentCurrentYear.value = date.getFullYear();
-    }
-});
 
 // Grouped entries computed property
 interface GroupedEntry {
@@ -1134,7 +885,7 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                                         <td
                                             :class="[
                                                 'px-4 py-3 text-right text-sm font-medium',
-                                                getTypeColor(entry.type),
+                                                getAmountColor(entry),
                                             ]"
                                         >
                                             {{ formatRemainingAmount(entry) }}
@@ -1168,15 +919,20 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
                                     ]"
                                 >
                                     <td v-if="groupBy !== 'date'" class="px-4 py-3 text-sm">
-                                        {{ formatDate(entry.date) }}
+                                        <div>{{ formatDate(entry.date) }}</div>
                                     </td>
                                     <td v-if="groupBy !== 'category'" class="px-4 py-3 text-sm">
-                                        {{ entry.category?.name ?? 'Uncategorized' }}
+                                        <span
+                                            :class="[
+                                                'inline-flex items-center rounded-full px-2.5 py-0.5 font-medium capitalize',
+                                                getTypeBadgeColor(entry.type),
+                                            ]"
+                                        >{{ entry.category?.name ?? 'Uncategorized' }}</span>
                                     </td>
                                     <td
                                         :class="[
                                             'px-4 py-3 text-right text-sm font-medium',
-                                            getTypeColor(entry.type),
+                                            getAmountColor(entry),
                                         ]"
                                     >
                                         {{ formatRemainingAmount(entry) }}
@@ -1201,970 +957,41 @@ const groupedEntries = computed<GroupedEntry[] | null>(() => {
             </div>
 
             <!-- Add Entry Dialog -->
-            <Dialog v-model:open="addDialogOpen">
-                <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>Add Entry</DialogTitle>
-                        <DialogDescription>
-                            Create a new income or expense entry
-                        </DialogDescription>
-                    </DialogHeader>
-                    <Form
-                        ref="addEntryFormRef"
-                        :key="'create'"
-                        v-bind="storeEntry.form()"
-                        :reset-on-success="true"
-                        :preserve-scroll="true"
-                        @success="() => { 
-                            clearCategory(); 
-                            // Note: If saveAndAddNew is true, the modal will reopen via onMounted
-                            // after the redirect completes, so we don't need to handle it here
-                            if (!saveAndAddNew.value) {
-                                closeAddModal();
-                            }
-                            saveAndAddNew.value = false;
-                        }"
-                        class="grid gap-4 sm:grid-cols-2"
-                        v-slot="{ errors, processing }"
-                    >
-                        <div class="grid gap-2 sm:col-span-1">
-                            <Label for="add-type">Type</Label>
-                            <div class="inline-flex gap-1 rounded-lg border border-input bg-background p-1">
-                                <button
-                                    type="button"
-                                    @click="formType = 'expense'"
-                                    :class="[
-                                        'flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                                        formType === 'expense'
-                                            ? 'bg-red-500 text-white shadow-sm'
-                                            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                                    ]"
-                                >
-                                    Expense
-                                </button>
-                                <button
-                                    type="button"
-                                    @click="formType = 'income'"
-                                    :class="[
-                                        'flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                                        formType === 'income'
-                                            ? 'bg-green-500 text-white shadow-sm'
-                                            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                                    ]"
-                                >
-                                    Income
-                                </button>
-                            </div>
-                            <input
-                                type="hidden"
-                                name="type"
-                                :value="formType"
-                            />
-                            <InputError :message="errors.type" />
-                        </div>
-
-                        <div class="relative grid gap-2 sm:col-span-1">
-                            <Label for="add-amount">Amount</Label>
-                            <Input
-                                id="add-amount"
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                name="amount"
-                                v-model="formAmount"
-                                required
-                                placeholder="0.00"
-                            />
-                            <InputError :message="errors.amount" />
-                        </div>
-
-                        <div class="relative grid gap-2 sm:col-span-1">
-                            <Label for="add-category">Category</Label>
-                            <div class="relative">
-                                <Input
-                                    ref="categoryInputRef"
-                                    id="add-category"
-                                    v-model="categoryInput"
-                                    @input="handleCategoryInput"
-                                    @focus="showSuggestions = true"
-                                    @blur="showSuggestions = false"
-                                    required
-                                    placeholder="Type to search or create new category"
-                                    autocomplete="off"
-                                />
-                                <!-- Hidden input for category_id if an existing category is selected -->
-                                <input
-                                    v-if="selectedCategoryId"
-                                    type="hidden"
-                                    name="category_id"
-                                    :value="selectedCategoryId"
-                                />
-                                <!-- Hidden input for category_name if no existing category is selected -->
-                                <input
-                                    v-else
-                                    type="hidden"
-                                    name="category_name"
-                                    :value="categoryInput.trim()"
-                                />
-                                <!-- Suggestions dropdown -->
-                                <div
-                                    ref="categoryDropdownRef"
-                                    v-if="showSuggestions && filteredCategories.length > 0"
-                                    @mousedown.prevent
-                                    class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-sidebar-border/70 bg-card shadow-lg dark:border-sidebar-border"
-                                >
-                                    <ul class="py-1">
-                                        <li
-                                            v-for="category in filteredCategories"
-                                            :key="category.id"
-                                            @mousedown.prevent="selectCategory(category)"
-                                            class="cursor-pointer px-4 py-2 text-sm hover:bg-muted"
-                                        >
-                                            {{ category.name }}
-                                        </li>
-                                    </ul>
-                                </div>
-                            </div>
-                            <InputError :message="errors.category_name || errors.category_id" />
-                        </div>
-
-                        <div class="relative grid gap-2 sm:col-span-1">
-                            <Label for="add-date">Date</Label>
-                            <div class="relative">
-                                <Input
-                                    ref="dateInputRef"
-                                    id="add-date"
-                                    type="text"
-                                    :model-value="formattedDate"
-                                    @focus="showDatepicker = true"
-                                    @click="showDatepicker = true"
-                                    @blur="showDatepicker = false"
-                                    required
-                                    placeholder="Select date"
-                                    autocomplete="off"
-                                    readonly
-                                />
-                                <!-- Hidden input for form submission with proper name -->
-                                <input
-                                    type="hidden"
-                                    name="date"
-                                    :value="dateInput"
-                                />
-                                <!-- Datepicker dropdown -->
-                                <div
-                                    ref="datepickerRef"
-                                    v-if="showDatepicker"
-                                    @mousedown="handleDatepickerMouseDown"
-                                    class="absolute z-50 mt-1 w-[280px] rounded-md border border-sidebar-border/70 bg-card shadow-lg dark:border-sidebar-border"
-                                >
-                                    <div class="p-4">
-                                        <!-- Month/Year header -->
-                                        <div class="mb-4 flex items-center justify-between">
-                                            <button
-                                                type="button"
-                                                @click="previousMonth"
-                                                class="rounded-md p-1 hover:bg-muted"
-                                            >
-                                                <svg
-                                                    class="h-4 w-4"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    viewBox="0 0 24 24"
-                                                >
-                                                    <path
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M15 19l-7-7 7-7"
-                                                    />
-                                                </svg>
-                                            </button>
-                                            <div class="text-sm font-medium">
-                                                {{ getMonthName(currentMonth) }} {{ currentYear }}
-                                            </div>
-                                            <button
-                                                type="button"
-                                                @click="nextMonth"
-                                                class="rounded-md p-1 hover:bg-muted"
-                                            >
-                                                <svg
-                                                    class="h-4 w-4"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    viewBox="0 0 24 24"
-                                                >
-                                                    <path
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M9 5l7 7-7 7"
-                                                    />
-                                                </svg>
-                                            </button>
-                                        </div>
-                                        
-                                        <!-- Day names header -->
-                                        <div class="mb-2 grid grid-cols-7 gap-1 text-center text-xs text-muted-foreground">
-                                            <div>S</div>
-                                            <div>M</div>
-                                            <div>T</div>
-                                            <div>W</div>
-                                            <div>T</div>
-                                            <div>F</div>
-                                            <div>S</div>
-                                        </div>
-                                        
-                                        <!-- Calendar grid -->
-                                        <div class="grid grid-cols-7 gap-1">
-                                            <button
-                                                v-for="(day, index) in getCalendarDays"
-                                                :key="index"
-                                                type="button"
-                                                @mousedown.prevent="selectDate(day)"
-                                                :disabled="day === null"
-                                                :class="[
-                                                    'h-9 w-9 rounded-md text-sm transition-colors flex items-center justify-center',
-                                                    day === null
-                                                        ? 'cursor-default invisible'
-                                                        : 'hover:bg-muted cursor-pointer',
-                                                    isToday(day) && !isSelected(day)
-                                                        ? 'bg-primary/10 text-primary font-semibold'
-                                                        : '',
-                                                    isSelected(day)
-                                                        ? 'bg-primary text-primary-foreground font-semibold'
-                                                        : 'text-foreground',
-                                                ]"
-                                            >
-                                                {{ day }}
-                                            </button>
-                                        </div>
-                                        
-                                        <!-- Today button -->
-                                        <div class="mt-3 flex justify-center">
-                                            <button
-                                                type="button"
-                                                @click="goToToday"
-                                                class="text-xs text-muted-foreground hover:text-foreground"
-                                            >
-                                                Today
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <InputError :message="errors.date" />
-                        </div>
-
-                        <div class="grid gap-2 sm:col-span-2">
-                            <Label for="add-description">Description (optional)</Label>
-                            <textarea
-                                id="add-description"
-                                name="description"
-                                v-model="formDescription"
-                                rows="3"
-                                placeholder="Add a description for this entry..."
-                                class="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                            ></textarea>
-                            <InputError :message="errors.description" />
-                        </div>
-
-                        <DialogFooter class="sm:col-span-2">
-                            <DialogClose as-child>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    @click="closeAddModal"
-                                >
-                                    Cancel
-                                </Button>
-                            </DialogClose>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                :disabled="processing"
-                                @click="handleSaveAndAddNew"
-                            >
-                                {{ processing ? 'Saving...' : 'Save and Add New' }}
-                            </Button>
-                            <Button
-                                type="submit"
-                                :disabled="processing"
-                            >
-                                {{ processing ? 'Saving...' : 'Save' }}
-                            </Button>
-                        </DialogFooter>
-                    </Form>
-                </DialogContent>
-            </Dialog>
+            <AddEntryDialog
+                v-model:open="addDialogOpen"
+                :categories="categories"
+                @close="addDialogOpen = false"
+            />
 
             <!-- View Entry Dialog -->
-            <Dialog v-model:open="viewDialogOpen">
-                <DialogContent class="max-w-2xl">
-                    <DialogHeader>
-                        <DialogTitle>Entry Details</DialogTitle>
-                        <DialogDescription>
-                            View entry information
-                        </DialogDescription>
-                    </DialogHeader>
-                    
-                    <div v-if="viewingEntry" class="grid gap-4">
-                        <!-- Entry Information -->
-                        <div class="grid gap-4 sm:grid-cols-2">
-                            <div class="grid gap-2">
-                                <Label class="text-xs text-muted-foreground">Type</Label>
-                                <div>
-                                    <span
-                                        :class="[
-                                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                                            getTypeBadgeColor(viewingEntry.type),
-                                        ]"
-                                    >
-                                        {{ viewingEntry.type === 'income' ? 'Income' : 'Expense' }}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div class="grid gap-2">
-                                <Label class="text-xs text-muted-foreground">Amount</Label>
-                                <div
-                                    :class="[
-                                        'text-lg font-semibold',
-                                        getTypeColor(viewingEntry.type),
-                                    ]"
-                                >
-                                    {{ formatCurrency(viewingEntry.amount) }}
-                                </div>
-                            </div>
-
-                            <div class="grid gap-2">
-                                <Label class="text-xs text-muted-foreground">Category</Label>
-                                <div class="text-sm font-medium">
-                                    {{ viewingEntry.category?.name ?? 'Uncategorized' }}
-                                </div>
-                            </div>
-
-                            <div class="grid gap-2">
-                                <Label class="text-xs text-muted-foreground">Date</Label>
-                                <div class="text-sm font-medium">
-                                    {{ formatDate(viewingEntry.date) }}
-                                </div>
-                            </div>
-
-                            <div
-                                v-if="viewingEntry.description"
-                                class="grid gap-2 sm:col-span-2"
-                            >
-                                <Label class="text-xs text-muted-foreground">Description</Label>
-                                <div class="text-sm">
-                                    {{ viewingEntry.description }}
-                                </div>
-                            </div>
-
-                            <!-- Payment Information -->
-                            <div class="grid gap-2 sm:col-span-2">
-                                <Label class="text-xs text-muted-foreground">Payment Status</Label>
-                                <div class="rounded-lg border border-sidebar-border/70 bg-muted/50 p-4 dark:border-sidebar-border">
-                                    <div class="flex items-center justify-between">
-                                        <div>
-                                            <div class="text-sm font-medium">Total Amount</div>
-                                            <div
-                                                :class="[
-                                                    'text-lg font-semibold',
-                                                    getTypeColor(viewingEntry.type),
-                                                ]"
-                                            >
-                                                {{ formatCurrency(viewingEntry.amount) }}
-                                            </div>
-                                        </div>
-                                        <div class="text-center">
-                                            <div class="text-sm font-medium">Total Paid</div>
-                                            <div class="text-lg font-semibold">
-                                                {{ formatCurrency(String(viewingEntry.total_paid || 0)) }}
-                                            </div>
-                                        </div>
-                                        <div class="text-right">
-                                            <div class="text-sm font-medium">Remaining</div>
-                                            <div
-                                                :class="[
-                                                    'text-lg font-semibold',
-                                                    getRemainingAmount(viewingEntry) === 0
-                                                        ? 'text-muted-foreground'
-                                                        : getTypeColor(viewingEntry.type),
-                                                ]"
-                                            >
-                                                {{ formatRemainingAmount(viewingEntry) }}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div
-                                        v-if="isFullyPaid(viewingEntry)"
-                                        class="mt-2 text-center text-xs text-green-600 dark:text-green-400"
-                                    >
-                                        ✓ Fully Paid
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <DialogFooter>
-                        <DialogClose as-child>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                @click="closeViewModal"
-                            >
-                                Close
-                            </Button>
-                        </DialogClose>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            @click="openPaymentFromView"
-                            :disabled="!viewingEntry || isFullyPaid(viewingEntry!)"
-                        >
-                            <CreditCard class="h-4 w-4 mr-2" />
-                            Record Payment
-                        </Button>
-                        <Button
-                            type="button"
-                            @click="openEditFromView"
-                            :disabled="!viewingEntry"
-                        >
-                            Edit Entry
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <ViewEntryDialog
+                v-model:open="viewDialogOpen"
+                :entry="viewingEntry"
+                @edit="openEditFromView"
+                @record-payment="openPaymentFromView"
+            />
 
             <!-- Edit Entry Dialog -->
-            <Dialog v-model:open="editDialogOpen">
-                <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>Edit Entry</DialogTitle>
-                        <DialogDescription>
-                            Update the entry details
-                        </DialogDescription>
-                    </DialogHeader>
-                    <Form
-                        v-if="editingEntry"
-                        :key="`edit-${editingEntry.id}`"
-                        v-bind="updateEntry.form({ entry: editingEntry.id })"
-                        :reset-on-success="false"
-                        :preserve-scroll="true"
-                        @success="() => { clearCategory(); closeEditModal(); }"
-                        class="grid gap-4 sm:grid-cols-2"
-                        v-slot="{ errors, processing }"
-                    >
-                        <div class="grid gap-2 sm:col-span-1">
-                            <Label for="edit-type">Type</Label>
-                            <select
-                                id="edit-type"
-                                name="type"
-                                v-model="formType"
-                                required
-                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                <option value="">Select type</option>
-                                <option value="income">Income</option>
-                                <option value="expense">Expense</option>
-                            </select>
-                            <InputError :message="errors.type" />
-                        </div>
-
-                        <div class="relative grid gap-2 sm:col-span-1">
-                            <Label for="edit-amount">Amount</Label>
-                            <Input
-                                id="edit-amount"
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                name="amount"
-                                v-model="formAmount"
-                                required
-                                placeholder="0.00"
-                            />
-                            <InputError :message="errors.amount" />
-                        </div>
-
-                        <div class="relative grid gap-2 sm:col-span-2">
-                            <Label for="edit-category">Category</Label>
-                            <div class="relative">
-                                <Input
-                                    ref="categoryInputRef"
-                                    id="edit-category"
-                                    v-model="categoryInput"
-                                    @input="handleCategoryInput"
-                                    @focus="showSuggestions = true"
-                                    @blur="showSuggestions = false"
-                                    required
-                                    placeholder="Type to search or create new category"
-                                    autocomplete="off"
-                                />
-                                <!-- Hidden input for category_id if an existing category is selected -->
-                                <input
-                                    v-if="selectedCategoryId"
-                                    type="hidden"
-                                    name="category_id"
-                                    :value="selectedCategoryId"
-                                />
-                                <!-- Hidden input for category_name if no existing category is selected -->
-                                <input
-                                    v-else
-                                    type="hidden"
-                                    name="category_name"
-                                    :value="categoryInput.trim()"
-                                />
-                                <!-- Suggestions dropdown -->
-                                <div
-                                    ref="categoryDropdownRef"
-                                    v-if="showSuggestions && filteredCategories.length > 0"
-                                    @mousedown.prevent
-                                    class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-sidebar-border/70 bg-card shadow-lg dark:border-sidebar-border"
-                                >
-                                    <ul class="py-1">
-                                        <li
-                                            v-for="category in filteredCategories"
-                                            :key="category.id"
-                                            @mousedown.prevent="selectCategory(category)"
-                                            class="cursor-pointer px-4 py-2 text-sm hover:bg-muted"
-                                        >
-                                            {{ category.name }}
-                                        </li>
-                                    </ul>
-                                </div>
-                            </div>
-                            <InputError :message="errors.category_name || errors.category_id" />
-                        </div>
-
-                        <div class="relative grid gap-2 sm:col-span-2">
-                            <Label for="edit-date">Date</Label>
-                            <div class="relative">
-                                <Input
-                                    ref="dateInputRef"
-                                    id="edit-date"
-                                    type="text"
-                                    :model-value="formattedDate"
-                                    @focus="showDatepicker = true"
-                                    @click="showDatepicker = true"
-                                    @blur="showDatepicker = false"
-                                    required
-                                    placeholder="Select date"
-                                    autocomplete="off"
-                                    readonly
-                                />
-                                <!-- Hidden input for form submission with proper name -->
-                                <input
-                                    type="hidden"
-                                    name="date"
-                                    :value="dateInput"
-                                />
-                                <!-- Datepicker dropdown -->
-                                <div
-                                    ref="datepickerRef"
-                                    v-if="showDatepicker"
-                                    @mousedown="handleDatepickerMouseDown"
-                                    class="absolute z-50 mt-1 w-[280px] rounded-md border border-sidebar-border/70 bg-card shadow-lg dark:border-sidebar-border"
-                                >
-                                    <div class="p-4">
-                                        <!-- Month/Year header -->
-                                        <div class="mb-4 flex items-center justify-between">
-                                            <button
-                                                type="button"
-                                                @click="previousMonth"
-                                                class="rounded-md p-1 hover:bg-muted"
-                                            >
-                                                <svg
-                                                    class="h-4 w-4"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    viewBox="0 0 24 24"
-                                                >
-                                                    <path
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M15 19l-7-7 7-7"
-                                                    />
-                                                </svg>
-                                            </button>
-                                            <div class="text-sm font-medium">
-                                                {{ getMonthName(currentMonth) }} {{ currentYear }}
-                                            </div>
-                                            <button
-                                                type="button"
-                                                @click="nextMonth"
-                                                class="rounded-md p-1 hover:bg-muted"
-                                            >
-                                                <svg
-                                                    class="h-4 w-4"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    viewBox="0 0 24 24"
-                                                >
-                                                    <path
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M9 5l7 7-7 7"
-                                                    />
-                                                </svg>
-                                            </button>
-                                        </div>
-                                        
-                                        <!-- Day names header -->
-                                        <div class="mb-2 grid grid-cols-7 gap-1 text-center text-xs text-muted-foreground">
-                                            <div>S</div>
-                                            <div>M</div>
-                                            <div>T</div>
-                                            <div>W</div>
-                                            <div>T</div>
-                                            <div>F</div>
-                                            <div>S</div>
-                                        </div>
-                                        
-                                        <!-- Calendar grid -->
-                                        <div class="grid grid-cols-7 gap-1">
-                                            <button
-                                                v-for="(day, index) in getCalendarDays"
-                                                :key="index"
-                                                type="button"
-                                                @mousedown.prevent="selectDate(day)"
-                                                :disabled="day === null"
-                                                :class="[
-                                                    'h-9 w-9 rounded-md text-sm transition-colors flex items-center justify-center',
-                                                    day === null
-                                                        ? 'cursor-default invisible'
-                                                        : 'hover:bg-muted cursor-pointer',
-                                                    isToday(day) && !isSelected(day)
-                                                        ? 'bg-primary/10 text-primary font-semibold'
-                                                        : '',
-                                                    isSelected(day)
-                                                        ? 'bg-primary text-primary-foreground font-semibold'
-                                                        : 'text-foreground',
-                                                ]"
-                                            >
-                                                {{ day }}
-                                            </button>
-                                        </div>
-                                        
-                                        <!-- Today button -->
-                                        <div class="mt-3 flex justify-center">
-                                            <button
-                                                type="button"
-                                                @click="goToToday"
-                                                class="text-xs text-muted-foreground hover:text-foreground"
-                                            >
-                                                Today
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <InputError :message="errors.date" />
-                        </div>
-
-                        <div class="grid gap-2 sm:col-span-2">
-                            <Label for="edit-description">Description (optional)</Label>
-                            <textarea
-                                id="edit-description"
-                                name="description"
-                                v-model="formDescription"
-                                rows="3"
-                                placeholder="Add a description for this entry..."
-                                class="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                            ></textarea>
-                            <InputError :message="errors.description" />
-                        </div>
-
-                        <DialogFooter class="sm:col-span-2">
-                            <div class="flex w-full items-center justify-between">
-                                <Button
-                                    type="button"
-                                    variant="destructive"
-                                    @click="() => { confirmDelete(editingEntry!); closeEditModal(); }"
-                                    :disabled="processing"
-                                >
-                                    Delete
-                                </Button>
-                                <div class="flex gap-2">
-                                    <DialogClose as-child>
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            @click="closeEditModal"
-                                        >
-                                            Cancel
-                                        </Button>
-                                    </DialogClose>
-                                    <Button
-                                        type="submit"
-                                        :disabled="processing"
-                                    >
-                                        {{ processing ? 'Updating...' : 'Update Entry' }}
-                                    </Button>
-                                </div>
-                            </div>
-                        </DialogFooter>
-                    </Form>
-                </DialogContent>
-            </Dialog>
+            <EditEntryDialog
+                v-model:open="editDialogOpen"
+                :entry="editingEntry"
+                :categories="categories"
+                @close="editDialogOpen = false"
+                @delete="confirmDelete(editingEntry!)"
+            />
 
             <!-- Delete Confirmation Dialog -->
-            <Dialog v-model:open="deleteDialogOpen">
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Delete Entry</DialogTitle>
-                        <DialogDescription>
-                            Are you sure you want to delete this entry? This
-                            action cannot be undone.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose as-child>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                @click="
-                                    () => {
-                                        deleteDialogOpen = false;
-                                        entryToDelete = null;
-                                    }
-                                "
-                            >
-                                Cancel
-                            </Button>
-                        </DialogClose>
-                        <Button
-                            type="button"
-                            variant="destructive"
-                            @click="handleDelete"
-                        >
-                            Delete
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <DeleteEntryDialog
+                v-model:open="deleteDialogOpen"
+                @confirm="handleDelete"
+            />
 
             <!-- Record Payment Dialog -->
-            <Dialog v-model:open="paymentDialogOpen">
-                <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>Record Payment</DialogTitle>
-                        <DialogDescription>
-                            Record a payment for this entry
-                        </DialogDescription>
-                    </DialogHeader>
-                    
-                    <!-- Entry Information -->
-                    <div
-                        v-if="entryForPayment"
-                        class="rounded-lg border border-sidebar-border/70 bg-muted/50 p-4 dark:border-sidebar-border"
-                    >
-                        <div class="text-sm font-medium text-foreground">
-                            {{ entryForPayment.description || entryForPayment.category?.name || 'Entry' }}
-                        </div>
-                        <div class="mt-1 text-xs text-muted-foreground">
-                            <span class="capitalize">{{ entryForPayment.type }}</span>
-                            <span class="mx-2">•</span>
-                            <span>{{ formatCurrency(entryForPayment.amount) }}</span>
-                            <span v-if="entryForPayment.total_paid && parseFloat(String(entryForPayment.total_paid)) > 0" class="ml-2">
-                                ({{ formatCurrency(String(entryForPayment.total_paid)) }} paid)
-                            </span>
-                        </div>
-                    </div>
-                    
-                    <Form
-                        v-if="entryForPayment"
-                        :key="`payment-${entryForPayment.id}`"
-                        :action="`/entry-payments`"
-                        method="post"
-                        :preserve-scroll="true"
-                        @success="closePaymentModal"
-                        class="grid gap-4 sm:grid-cols-2"
-                        v-slot="{ errors, processing }"
-                    >
-                        <input
-                            type="hidden"
-                            name="entry_id"
-                            :value="entryForPayment.id"
-                        />
-
-                        <div class="relative grid gap-2 sm:col-span-1">
-                            <Label for="payment-amount">Amount</Label>
-                            <Input
-                                id="payment-amount"
-                                type="number"
-                                step="0.01"
-                                min="0.01"
-                                name="amount"
-                                v-model="paymentAmount"
-                                required
-                                placeholder="0.00"
-                            />
-                            <InputError :message="errors.amount" />
-                        </div>
-
-                        <div class="relative grid gap-2 sm:col-span-1">
-                            <Label for="payment-date">Date</Label>
-                            <div class="relative">
-                                <Input
-                                    ref="paymentDateInputRef"
-                                    id="payment-date"
-                                    type="text"
-                                    :model-value="paymentFormattedDate"
-                                    @focus="paymentDatepickerOpen = true"
-                                    @click="paymentDatepickerOpen = true"
-                                    @blur="paymentDatepickerOpen = false"
-                                    required
-                                    placeholder="Select date"
-                                    autocomplete="off"
-                                    readonly
-                                />
-                                <!-- Hidden input for form submission -->
-                                <input
-                                    type="hidden"
-                                    name="date"
-                                    :value="paymentDate"
-                                />
-                                <!-- Datepicker dropdown -->
-                                <div
-                                    ref="paymentDatepickerRef"
-                                    v-if="paymentDatepickerOpen"
-                                    @mousedown="handlePaymentDatepickerMouseDown"
-                                    class="absolute z-50 mt-1 w-[280px] rounded-md border border-sidebar-border/70 bg-card shadow-lg dark:border-sidebar-border"
-                                >
-                                    <div class="p-4">
-                                        <!-- Month/Year header -->
-                                        <div class="mb-4 flex items-center justify-between">
-                                            <button
-                                                type="button"
-                                                @click="previousPaymentMonth"
-                                                class="rounded-md p-1 hover:bg-muted"
-                                            >
-                                                <svg
-                                                    class="h-4 w-4"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    viewBox="0 0 24 24"
-                                                >
-                                                    <path
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M15 19l-7-7 7-7"
-                                                    />
-                                                </svg>
-                                            </button>
-                                            <div class="text-sm font-medium">
-                                                {{ getMonthName(paymentCurrentMonth) }} {{ paymentCurrentYear }}
-                                            </div>
-                                            <button
-                                                type="button"
-                                                @click="nextPaymentMonth"
-                                                class="rounded-md p-1 hover:bg-muted"
-                                            >
-                                                <svg
-                                                    class="h-4 w-4"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    viewBox="0 0 24 24"
-                                                >
-                                                    <path
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M9 5l7 7-7 7"
-                                                    />
-                                                </svg>
-                                            </button>
-                                        </div>
-                                        
-                                        <!-- Day names header -->
-                                        <div class="mb-2 grid grid-cols-7 gap-1 text-center text-xs text-muted-foreground">
-                                            <div>S</div>
-                                            <div>M</div>
-                                            <div>T</div>
-                                            <div>W</div>
-                                            <div>T</div>
-                                            <div>F</div>
-                                            <div>S</div>
-                                        </div>
-                                        
-                                        <!-- Calendar grid -->
-                                        <div class="grid grid-cols-7 gap-1">
-                                            <button
-                                                v-for="(day, index) in getPaymentCalendarDays"
-                                                :key="index"
-                                                type="button"
-                                                @mousedown.prevent="selectPaymentDate(day)"
-                                                :disabled="day === null"
-                                                :class="[
-                                                    'h-9 w-9 rounded-md text-sm transition-colors flex items-center justify-center',
-                                                    day === null
-                                                        ? 'cursor-default invisible'
-                                                        : 'hover:bg-muted cursor-pointer',
-                                                    isPaymentDateToday(day) && !isPaymentDateSelected(day)
-                                                        ? 'bg-primary/10 text-primary font-semibold'
-                                                        : '',
-                                                    isPaymentDateSelected(day)
-                                                        ? 'bg-primary text-primary-foreground font-semibold'
-                                                        : 'text-foreground',
-                                                ]"
-                                            >
-                                                {{ day }}
-                                            </button>
-                                        </div>
-                                        
-                                        <!-- Today button -->
-                                        <div class="mt-3 flex justify-center">
-                                            <button
-                                                type="button"
-                                                @click="goToPaymentToday"
-                                                class="text-xs text-muted-foreground hover:text-foreground"
-                                            >
-                                                Today
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <InputError :message="errors.date" />
-                        </div>
-
-                        <div class="grid gap-2 sm:col-span-2">
-                            <Label for="payment-notes">Notes (optional)</Label>
-                            <textarea
-                                id="payment-notes"
-                                name="notes"
-                                v-model="paymentNotes"
-                                rows="3"
-                                placeholder="Add notes about this payment..."
-                                class="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                            ></textarea>
-                            <InputError :message="errors.notes" />
-                        </div>
-
-                        <DialogFooter class="sm:col-span-2">
-                            <DialogClose as-child>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    @click="closePaymentModal"
-                                >
-                                    Cancel
-                                </Button>
-                            </DialogClose>
-                            <Button
-                                type="submit"
-                                :disabled="processing"
-                            >
-                                {{ processing ? 'Recording...' : 'Record Payment' }}
-                            </Button>
-                        </DialogFooter>
-                    </Form>
-                </DialogContent>
-            </Dialog>
+            <RecordPaymentDialog
+                v-model:open="paymentDialogOpen"
+                :entry="entryForPayment"
+                @close="paymentDialogOpen = false"
+            />
 
             <div
                 v-if="entries?.last_page && entries.last_page > 1"

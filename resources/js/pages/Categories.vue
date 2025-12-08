@@ -333,7 +333,7 @@ const getTypeBadgeColor = (type: string) => {
 
             <!-- Add Category Dialog -->
             <Dialog v-model:open="addDialogOpen">
-                <DialogContent class="max-w-2xl">
+                <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Add Category</DialogTitle>
                         <DialogDescription>
@@ -398,7 +398,7 @@ const getTypeBadgeColor = (type: string) => {
 
             <!-- Edit Category Dialog -->
             <Dialog v-model:open="editDialogOpen">
-                <DialogContent class="max-w-2xl">
+                <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Edit Category</DialogTitle>
                         <DialogDescription>
@@ -489,7 +489,7 @@ const getTypeBadgeColor = (type: string) => {
                         <div
                             v-for="item in entriesPaymentsData.items"
                             :key="`${item.type}-${item.id}`"
-                            class="rounded-lg border border-sidebar-border/70 p-4 dark:border-sidebar-border"
+                            class="rounded-lg border border-sidebar-border/70 bg-card p-4 dark:border-sidebar-border"
                         >
                             <div class="flex items-start justify-between">
                                 <div class="flex-1">
