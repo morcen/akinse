@@ -279,7 +279,7 @@ const submitDateRange = () => {
 <template>
     <Head title="Grouped Entries" />
 
-    <AppLayout :breadcrumbs="breadcrumbs">
+    <AppLayout :breadcrumbs="breadcrumbs" class="bg-secondary/50">
         <div
             class="flex h-full flex-1 flex-col gap-4 rounded-xl"
         >
@@ -366,7 +366,7 @@ const submitDateRange = () => {
                     <div 
                         :class="[
                             'sticky z-10 mb-4 flex-col items-center justify-between border-b border-sidebar-border/70 bg-card px-4 pb-3 pt-4',
-                            filtersOpen ? 'top-[200px]' : 'top-[88px]'
+                            filtersOpen ? 'top-[200px]' : 'top-[70px]'
                         ]"
                     >
                         <div class="flex items-center justify-between">
