@@ -24,7 +24,7 @@ const tabs: TabItem[] = [
     },
     {
         title: 'Categories',
-        href: categories().url,
+        href: entriesRoutes.grouped({ group: 'category' }).url,
         icon: Tag,
     },
     {

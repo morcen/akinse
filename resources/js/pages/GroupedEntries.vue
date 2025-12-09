@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button';
 import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
-} from '@/components/ui/collapsible';
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -13,7 +14,7 @@ import { destroy, grouped } from '@/routes/entries';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
-import { CreditCard, Filter, ChevronDown, CheckCircle } from 'lucide-vue-next';
+import { CreditCard, Filter, CheckCircle } from 'lucide-vue-next';
 import AddEntryDialog from '@/components/AddEntryDialog.vue';
 import ViewEntryDialog from '@/components/ViewEntryDialog.vue';
 import EditEntryDialog from '@/components/EditEntryDialog.vue';
@@ -164,6 +165,7 @@ const getCardColorClass = (entry: Entry): string => {
 };
 
 const getAmountColorByAmount = (amount: number) => {
+    console.log(amount);
     return amount > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
 };
 
@@ -267,8 +269,8 @@ const openPaymentModal = (entry: Entry) => {
 const dateFrom = ref(props.filters.date_from || '');
 const dateTo = ref(props.filters.date_to || '');
 
-// Filter collapsible state - closed by default
-const filtersOpen = ref(false);
+// Filter dialog state - closed by default
+const filtersDialogOpen = ref(false);
 
 // Watch for prop changes to update date range
 watch(() => props.filters, (newFilters) => {
@@ -281,6 +283,10 @@ const submitDateRange = () => {
     router.get(grouped.url({ group: props.group }), {
         date_from: dateFrom.value || undefined,
         date_to: dateTo.value || undefined,
+    }, {
+        onSuccess: () => {
+            filtersDialogOpen.value = false;
+        },
     });
 };
 
@@ -376,56 +382,63 @@ const shouldShowGroupedEntries = computed(() => {
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <!-- Filters Collapsible -->
-                    <Collapsible v-model:open="filtersOpen" class="flex items-center gap-2">
-                        <CollapsibleTrigger as-child>
-                            <Button variant="outline" type="button">
-                                <Filter class="h-4 w-4 mr-2" />
-                                <ChevronDown
-                                    class="h-4 w-4 ml-2 transition-transform duration-200"
-                                    :class="{ 'rotate-180': filtersOpen }"
-                                />
-                            </Button>
-                        </CollapsibleTrigger>
-                    </Collapsible>
+                    <!-- Filters Button -->
+                    <Button 
+                        variant="outline" 
+                        type="button"
+                        @click="filtersDialogOpen = true"
+                    >
+                        <Filter class="h-4 w-4" />
+                    </Button>
                     <Button @click="openAddModal">
                         Add Entry
                     </Button>
                 </div>
             </div>
 
-            <!-- Date Range Filter -->
-            <Collapsible v-model:open="filtersOpen" class="w-full px-4">
-                <CollapsibleContent class="mt-0">
-                    <div class="sticky top-[88px] z-20 rounded-xl border border-sidebar-border/70 bg-card p-4 dark:border-sidebar-border">
-                        <form @submit.prevent="submitDateRange" class="flex flex-col gap-4 sm:flex-row sm:items-end">
-                            <div class="flex flex-1 gap-2">
-                                <div class="flex-1">
-                                    <Label for="date-from">Date From</Label>
-                                    <Input
-                                        id="date-from"
-                                        type="date"
-                                        v-model="dateFrom"
-                                        required
-                                    />
-                                </div>
-                                <div class="flex-1">
-                                    <Label for="date-to">Date To</Label>
-                                    <Input
-                                        id="date-to"
-                                        type="date"
-                                        v-model="dateTo"
-                                        required
-                                    />
-                                </div>
+            <!-- Filter Dialog -->
+            <Dialog :open="filtersDialogOpen" @update:open="(value) => filtersDialogOpen = value">
+                <DialogContent class="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Filter Entries</DialogTitle>
+                    </DialogHeader>
+                    <form @submit.prevent="submitDateRange" class="flex flex-col gap-4">
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <div class="flex-1">
+                                <Label for="date-from">Date From</Label>
+                                <Input
+                                    id="date-from"
+                                    type="date"
+                                    v-model="dateFrom"
+                                    required
+                                />
                             </div>
-                            <Button type="submit">
+                            <div class="flex-1">
+                                <Label for="date-to">Date To</Label>
+                                <Input
+                                    id="date-to"
+                                    type="date"
+                                    v-model="dateTo"
+                                    required
+                                />
+                            </div>
+                        </div>
+                        <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                            <Button 
+                                type="button" 
+                                variant="outline"
+                                @click="filtersDialogOpen = false"
+                                class="w-full sm:w-auto"
+                            >
+                                Cancel
+                            </Button>
+                            <Button type="submit" class="w-full sm:w-auto">
                                 Apply Filter
                             </Button>
-                        </form>
-                    </div>
-                </CollapsibleContent>
-            </Collapsible>
+                        </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
 
             <!-- No entries message (only show if no date range is set for date grouping) -->
             <div
@@ -449,10 +462,7 @@ const shouldShowGroupedEntries = computed(() => {
                 >
                     <!-- Group header -->
                     <div 
-                        :class="[
-                            'sticky z-10 mb-4 flex-col items-center justify-between border-b border-sidebar-border/70 bg-card px-4 pb-3 pt-4',
-                            filtersOpen ? 'top-[200px]' : 'top-[70px]'
-                        ]"
+                        class="sticky z-10 mb-4 flex-col items-center justify-between border-b border-sidebar-border/70 bg-card px-4 pb-3 pt-4 top-[70px]"
                     >
                         <div class="flex items-center justify-between">
                             <div class="flex-col items-center gap-2">
@@ -464,7 +474,7 @@ const shouldShowGroupedEntries = computed(() => {
                                 </div>
                             </div>
                             <div v-if="entryGroup.entries.length > 0" class="flex items-end gap-1 text-xs">
-                                Net: <span class="text-muted-foreground font-medium" :class="getAmountColorByAmount(entryGroup.totalIncome - entryGroup.totalPayable)">
+                                Net: <span class="font-medium" :class="getAmountColorByAmount(entryGroup.totalIncome - entryGroup.totalPayable)">
                                         {{ formatCurrency(String(entryGroup.totalIncome - entryGroup.totalPayable)) }}
                                     </span>
                             </div>

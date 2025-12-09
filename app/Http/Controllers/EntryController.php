@@ -176,7 +176,7 @@ class EntryController extends Controller
                 return $entry->category ? $entry->category->name : 'Uncategorized';
             });
             foreach ($grouped as $categoryName => $groupEntries) {
-                $totalPayable = $groupEntries->sum('amount');
+                $totalPayable = $groupEntries->where('type', EntryTypesEnum::EXPENSE)->sum('amount');
                 $totalPayment = $groupEntries->sum(fn($e) => $e->totalPaid);
                 $totalRemaining = $totalPayable - $totalPayment;
                 $totalIncome = $groupEntries->where('type', EntryTypesEnum::INCOME)->sum('amount');

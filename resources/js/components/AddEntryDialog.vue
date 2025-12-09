@@ -45,11 +45,20 @@ const formatDateLocal = (date: Date): string => {
     return `${year}-${month}-${day}`;
 };
 
-const parseDateLocal = (dateString: string | null | undefined): Date => {
+const parseDateLocal = (dateString: string | null | undefined | Date): Date => {
     if (!dateString) {
         return new Date();
     }
-    const datePart = dateString.split('T')[0].split(' ')[0];
+    
+    // Handle Date objects
+    if (dateString instanceof Date) {
+        return dateString;
+    }
+    
+    // Ensure dateString is actually a string (handle other types)
+    const str = typeof dateString === 'string' ? dateString : String(dateString);
+    
+    const datePart = str.split('T')[0].split(' ')[0];
     const [year, month, day] = datePart.split('-').map(Number);
     
     if (isNaN(year) || isNaN(month) || isNaN(day)) {
