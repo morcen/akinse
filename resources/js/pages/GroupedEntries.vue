@@ -195,9 +195,18 @@ const entryToDelete = ref<Entry | null>(null);
 const entryForPayment = ref<Entry | null>(null);
 
 // Open add entry modal
-const openAddModal = () => {
+const openAddModal = (date?: string) => {
     addDialogOpen.value = true;
+    if (date) {
+        // Store the date to pass to AddEntryDialog
+        entryDateForAdd.value = date;
+    } else {
+        entryDateForAdd.value = undefined;
+    }
 };
+
+// Store date for AddEntryDialog when opening from empty date group
+const entryDateForAdd = ref<string | undefined>(undefined);
 
 // Open view modal
 const viewEntry = (entry: Entry) => {
@@ -274,6 +283,77 @@ const submitDateRange = () => {
         date_to: dateTo.value || undefined,
     });
 };
+
+// Generate all dates in a range
+const generateDateRange = (startDate: string, endDate: string): string[] => {
+    const dates: string[] = [];
+    const start = parseDateLocal(startDate);
+    const end = parseDateLocal(endDate);
+    
+    // Ensure start is before or equal to end
+    if (start > end) {
+        return dates;
+    }
+    
+    const current = new Date(start);
+    while (current <= end) {
+        const year = current.getFullYear();
+        const month = String(current.getMonth() + 1).padStart(2, '0');
+        const day = String(current.getDate()).padStart(2, '0');
+        dates.push(`${year}-${month}-${day} 00:00:00`);
+        current.setDate(current.getDate() + 1);
+    }
+    
+    return dates;
+};
+
+// Create complete list of groups including empty dates
+const completeGroupedEntries = computed(() => {
+    // Only process if group is 'date' and we have date filters
+    if (props.group !== 'date' || !dateFrom.value || !dateTo.value) {
+        return props.groupedEntries;
+    }
+    
+    // Generate all dates in the range
+    const allDates = generateDateRange(dateFrom.value, dateTo.value);
+    
+    // Create a map of existing groups by date
+    const existingGroupsMap = new Map<string, GroupedEntry>();
+    props.groupedEntries.forEach(group => {
+        existingGroupsMap.set(group.groupKey, group);
+    });
+    
+    // Create complete list with empty groups for dates without entries
+    const completeGroups: GroupedEntry[] = allDates.map(date => {
+        const existingGroup = existingGroupsMap.get(date);
+        if (existingGroup) {
+            return existingGroup;
+        }
+        
+        // Create empty group for date without entries
+        return {
+            groupKey: date,
+            groupLabel: formatDate(date),
+            entries: [],
+            totalPayable: 0,
+            totalPayment: 0,
+            totalRemaining: 0,
+            totalIncome: 0,
+        };
+    });
+    
+    return completeGroups;
+});
+
+// Check if we should show the grouped entries section
+const shouldShowGroupedEntries = computed(() => {
+    if (props.group === 'date') {
+        // For date grouping, show if we have date filters
+        return !!(dateFrom.value && dateTo.value);
+    }
+    // For other groupings, show if we have entries
+    return props.groupedEntries && props.groupedEntries.length > 0;
+});
 </script>
 
 <template>
@@ -347,18 +427,23 @@ const submitDateRange = () => {
                 </CollapsibleContent>
             </Collapsible>
 
-            <!-- No entries message -->
+            <!-- No entries message (only show if no date range is set for date grouping) -->
             <div
-                v-if="!groupedEntries || groupedEntries.length === 0"
+                v-if="!shouldShowGroupedEntries"
                 class="mx-4 rounded-xl border border-sidebar-border/70 bg-card p-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
             >
-                No entries found for the selected date range. Start by adding your first entry.
+                <template v-if="group === 'date' && (!dateFrom || !dateTo)">
+                    Please select a date range to view entries.
+                </template>
+                <template v-else>
+                    No entries found for the selected filters. Start by adding your first entry.
+                </template>
             </div>
 
             <!-- Grouped entries cards -->
             <div v-else class="flex flex-col gap-4 px-4 pb-4">
                 <div
-                    v-for="(entryGroup, groupIndex) in groupedEntries"
+                    v-for="(entryGroup, groupIndex) in completeGroupedEntries"
                     :key="`group-${entryGroup.groupKey}-${groupIndex}`"
                     class="rounded-xl border border-sidebar-border/70 bg-card dark:border-sidebar-border"
                 >
@@ -373,19 +458,19 @@ const submitDateRange = () => {
                             <div class="flex-col items-center gap-2">
                                 <div class="flex items-center gap-2">
                                     <h2 class="text-lg font-semibold">{{ group === 'date' ? formatDate(entryGroup.groupKey) : entryGroup.groupLabel }}</h2>
-                                    <span class="text-sm text-muted-foreground">
+                                    <span v-if="entryGroup.entries.length > 0" class="text-sm text-muted-foreground">
                                         ({{ entryGroup.entries.length }} {{ entryGroup.entries.length === 1 ? 'entry' : 'entries' }})
                                     </span>
                                 </div>
                             </div>
-                            <div class="flex items-end gap-1 text-xs">
+                            <div v-if="entryGroup.entries.length > 0" class="flex items-end gap-1 text-xs">
                                 Net: <span class="text-muted-foreground font-medium" :class="getAmountColorByAmount(entryGroup.totalIncome - entryGroup.totalPayable)">
                                         {{ formatCurrency(String(entryGroup.totalIncome - entryGroup.totalPayable)) }}
                                     </span>
                             </div>
                         </div>
 
-                        <div class="flex items-center justify-evenly gap-2">
+                        <div v-if="entryGroup.entries.length > 0" class="flex items-center justify-evenly gap-2">
                            <div class="flex-col items-center gap-2 w-full">
                                 <div class="text-xs text-center text-muted-foreground">Payable</div>
                                 <div class="text-xs text-center text-red-600 dark:text-red-400 font-medium">{{ formatCurrency(String(entryGroup.totalPayable)) }}</div>
@@ -401,8 +486,8 @@ const submitDateRange = () => {
                         </div>
                     </div>
 
-                    <!-- Entries in group -->
-                    <div class="grid gap-3 px-4 pb-4">
+                    <!-- Entries in group or empty state -->
+                    <div v-if="entryGroup.entries.length > 0" class="grid gap-3 px-4 pb-4">
                         <div
                             v-for="entry in entryGroup.entries"
                             :key="entry.id"
@@ -464,6 +549,18 @@ const submitDateRange = () => {
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Empty state for dates without entries -->
+                    <div v-else class="px-4 pb-4">
+                        <div class="rounded-lg border border-sidebar-border/70 border-dashed p-8 text-center">
+                            <p class="text-sm text-muted-foreground mb-4">
+                                No entries for this date.
+                            </p>
+                            <Button @click="openAddModal(entryGroup.groupKey)" variant="outline">
+                                Add Entry
+                            </Button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -471,6 +568,7 @@ const submitDateRange = () => {
             <AddEntryDialog
                 v-model:open="addDialogOpen"
                 :categories="categories"
+                :initial-date="entryDateForAdd"
                 @close="addDialogOpen = false"
             />
 

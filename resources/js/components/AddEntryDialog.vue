@@ -24,9 +24,12 @@ interface Category {
 interface Props {
     open: boolean;
     categories: Category[];
+    initialDate?: string;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+    initialDate: undefined,
+});
 
 const emit = defineEmits<{
     'update:open': [value: boolean];
@@ -71,11 +74,38 @@ const categoryDropdownRef = ref<HTMLElement | null>(null);
 
 // Datepicker state
 const showDatepicker = ref(false);
-const dateInput = ref(formatDateLocal(new Date()));
+const dateInput = ref(props.initialDate ? formatDateLocal(parseDateLocal(props.initialDate)) : formatDateLocal(new Date()));
 const currentMonth = ref(new Date().getMonth());
 const currentYear = ref(new Date().getFullYear());
 const datepickerRef = ref<HTMLElement | null>(null);
 const dateInputRef = ref<HTMLElement | null>(null);
+
+// Watch for dialog open to set initial date
+watch(() => props.open, (isOpen) => {
+    if (isOpen) {
+        if (props.initialDate) {
+            dateInput.value = formatDateLocal(parseDateLocal(props.initialDate));
+            const date = parseDateLocal(props.initialDate);
+            currentMonth.value = date.getMonth();
+            currentYear.value = date.getFullYear();
+        } else {
+            dateInput.value = formatDateLocal(new Date());
+            const today = new Date();
+            currentMonth.value = today.getMonth();
+            currentYear.value = today.getFullYear();
+        }
+    }
+});
+
+// Watch for initialDate prop changes when dialog is open
+watch(() => props.initialDate, (newDate) => {
+    if (newDate && props.open) {
+        dateInput.value = formatDateLocal(parseDateLocal(newDate));
+        const date = parseDateLocal(newDate);
+        currentMonth.value = date.getMonth();
+        currentYear.value = date.getFullYear();
+    }
+});
 
 // Save and add new state
 const saveAndAddNew = ref(false);
@@ -273,7 +303,10 @@ const close = () => {
     formType.value = 'expense';
     formAmount.value = '';
     formDescription.value = '';
-    dateInput.value = formatDateLocal(new Date());
+    // Reset to initialDate if provided, otherwise today
+    dateInput.value = props.initialDate 
+        ? formatDateLocal(parseDateLocal(props.initialDate))
+        : formatDateLocal(new Date());
     showDatepicker.value = false;
 };
 
