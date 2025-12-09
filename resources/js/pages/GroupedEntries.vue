@@ -13,7 +13,7 @@ import { destroy, grouped } from '@/routes/entries';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
-import { CreditCard, Filter, ChevronDown } from 'lucide-vue-next';
+import { CreditCard, Filter, ChevronDown, CheckCircle } from 'lucide-vue-next';
 import AddEntryDialog from '@/components/AddEntryDialog.vue';
 import ViewEntryDialog from '@/components/ViewEntryDialog.vue';
 import EditEntryDialog from '@/components/EditEntryDialog.vue';
@@ -114,8 +114,9 @@ const formatDate = (date: string | null | undefined) => {
     
     try {
         const year = parseDateLocal(date).getFullYear();
-        
+        console.log("year", year);
         if (year === new Date().getFullYear()) {
+            console.log("current year");
             return parseDateLocal(date).toLocaleDateString('en-US', {
                 month: 'short',
                 day: 'numeric',
@@ -254,11 +255,8 @@ const openPaymentModal = (entry: Entry) => {
 const dateFrom = ref(props.filters.date_from || '');
 const dateTo = ref(props.filters.date_to || '');
 
-// Filter collapsible state - open by default if date filters are active
-const filtersOpen = ref(
-    (props.filters?.date_from || '') !== '' ||
-    (props.filters?.date_to || '') !== ''
-);
+// Filter collapsible state - closed by default
+const filtersOpen = ref(false);
 
 // Watch for prop changes to update date range
 watch(() => props.filters, (newFilters) => {
@@ -284,9 +282,9 @@ const submitDateRange = () => {
         >
             <div class="flex items-center justify-between">
                 <div>
-                    <h1 class="text-2xl font-semibold">Grouped Entries</h1>
-                    <p class="text-sm text-muted-foreground">
-                        View entries grouped by {{ group === 'date' ? 'date' : 'category' }}
+                    <h1 class="text-xl font-semibold">Entries</h1>
+                    <p class="text-xs text-muted-foreground">
+                        Entries grouped by {{ group === 'date' ? 'date' : 'category' }}
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
@@ -313,23 +311,25 @@ const submitDateRange = () => {
                 <CollapsibleContent class="mt-0">
                     <div class="rounded-xl border border-sidebar-border/70 bg-card p-4 dark:border-sidebar-border">
                         <form @submit.prevent="submitDateRange" class="flex flex-col gap-4 sm:flex-row sm:items-end">
-                            <div class="flex-1 grid gap-2">
-                                <Label for="date-from">Date From</Label>
-                                <Input
-                                    id="date-from"
-                                    type="date"
-                                    v-model="dateFrom"
-                                    required
-                                />
-                            </div>
-                            <div class="flex-1 grid gap-2">
-                                <Label for="date-to">Date To</Label>
-                                <Input
-                                    id="date-to"
-                                    type="date"
-                                    v-model="dateTo"
-                                    required
-                                />
+                            <div class="flex flex-1 gap-2">
+                                <div class="flex-1">
+                                    <Label for="date-from">Date From</Label>
+                                    <Input
+                                        id="date-from"
+                                        type="date"
+                                        v-model="dateFrom"
+                                        required
+                                    />
+                                </div>
+                                <div class="flex-1">
+                                    <Label for="date-to">Date To</Label>
+                                    <Input
+                                        id="date-to"
+                                        type="date"
+                                        v-model="dateTo"
+                                        required
+                                    />
+                                </div>
                             </div>
                             <Button type="submit">
                                 Apply Filter
@@ -398,9 +398,14 @@ const submitDateRange = () => {
                                     <div class="flex items-center gap-2 mb-2">
                                         <span
                                             v-if="group !== 'category'"
-                                            class="text-sm text-muted-foreground"
+                                            class="text-sm font-bold"
                                         >
+                                            <span v-if="isFullyPaid(entry)" class="flex items-center gap-1">    
+                                                <CheckCircle class="h-4 w-4 text-green-600 dark:text-green-400" /> {{ entry.category?.name ?? 'Uncategorized' }}
+                                            </span>
+                                            <span v-else>  
                                             {{ entry.category?.name ?? 'Uncategorized' }}
+                                            </span> 
                                         </span>
                                         <span
                                             v-if="group !== 'date'"

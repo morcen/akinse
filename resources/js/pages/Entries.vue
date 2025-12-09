@@ -418,9 +418,10 @@ const formatDate = (date: string | null | undefined) => {
     
     try {
         const year = parseDateLocal(date).getFullYear();
-        
+        console.log("year", year);
         // check if year is current year
         if (year === new Date().getFullYear()) {
+            console.log("current year");
             return parseDateLocal(date).toLocaleDateString('en-US', {
                 month: 'short',
                 day: 'numeric',

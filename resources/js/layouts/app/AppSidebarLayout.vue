@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppContent from '@/components/AppContent.vue';
 import AppShell from '@/components/AppShell.vue';
-import AppSidebar from '@/components/AppSidebar.vue';
+import BottomTabBar from '@/components/BottomTabBar.vue';
 import AppSidebarHeader from '@/components/AppSidebarHeader.vue';
 import type { BreadcrumbItemType } from '@/types';
 
@@ -15,11 +15,11 @@ withDefaults(defineProps<Props>(), {
 </script>
 
 <template>
-    <AppShell variant="sidebar">
-        <AppSidebar />
-        <AppContent variant="sidebar" class="overflow-x-hidden">
-            <AppSidebarHeader :breadcrumbs="breadcrumbs" />
+    <AppShell variant="header">
+        <AppContent variant="header" class="overflow-x-hidden pb-20">
+            <AppSidebarHeader :breadcrumbs="breadcrumbs" class="hidden md:block"/>
             <slot />
         </AppContent>
+        <BottomTabBar />
     </AppShell>
 </template>
