@@ -111,12 +111,11 @@ const formatDate = (date: string | null | undefined) => {
     if (!date) {
         return '';
     }
-    
+
     try {
         const year = parseDateLocal(date).getFullYear();
-        console.log("year", year);
+
         if (year === new Date().getFullYear()) {
-            console.log("current year");
             return parseDateLocal(date).toLocaleDateString('en-US', {
                 month: 'short',
                 day: 'numeric',
@@ -162,6 +161,10 @@ const getCardColorClass = (entry: Entry): string => {
 
     // Everything else uses default background
     return 'border-l-4 border-l-gray-300 dark:border-l-gray-600';
+};
+
+const getAmountColorByAmount = (amount: number) => {
+    return amount > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
 };
 
 const getAmountColor = (entry: Entry) => {
@@ -278,13 +281,18 @@ const submitDateRange = () => {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div
-            class="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4"
+            class="flex h-full flex-1 flex-col gap-4 rounded-xl"
         >
-            <div class="flex items-center justify-between">
+            <div class="sticky top-0 z-20 flex items-center justify-between bg-background px-4 pb-4 pt-4">
                 <div>
                     <h1 class="text-xl font-semibold">Entries</h1>
                     <p class="text-xs text-muted-foreground">
-                        Entries grouped by {{ group === 'date' ? 'date' : 'category' }}
+                        <template v-if="group !== 'date'">
+                            Entries grouped by category
+                        </template>
+                        <template v-else>
+                            {{ formatDate(dateFrom) }} - {{ formatDate(dateTo) }}
+                        </template>
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
@@ -307,9 +315,9 @@ const submitDateRange = () => {
             </div>
 
             <!-- Date Range Filter -->
-            <Collapsible v-model:open="filtersOpen" class="w-full">
+            <Collapsible v-model:open="filtersOpen" class="w-full px-4">
                 <CollapsibleContent class="mt-0">
-                    <div class="rounded-xl border border-sidebar-border/70 bg-card p-4 dark:border-sidebar-border">
+                    <div class="sticky top-[88px] z-20 rounded-xl border border-sidebar-border/70 bg-card p-4 dark:border-sidebar-border">
                         <form @submit.prevent="submitDateRange" class="flex flex-col gap-4 sm:flex-row sm:items-end">
                             <div class="flex flex-1 gap-2">
                                 <div class="flex-1">
@@ -342,48 +350,59 @@ const submitDateRange = () => {
             <!-- No entries message -->
             <div
                 v-if="!groupedEntries || groupedEntries.length === 0"
-                class="rounded-xl border border-sidebar-border/70 bg-card p-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
+                class="mx-4 rounded-xl border border-sidebar-border/70 bg-card p-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
             >
                 No entries found for the selected date range. Start by adding your first entry.
             </div>
 
             <!-- Grouped entries cards -->
-            <div v-else class="flex flex-col gap-4">
+            <div v-else class="flex flex-col gap-4 px-4 pb-4">
                 <div
                     v-for="(entryGroup, groupIndex) in groupedEntries"
                     :key="`group-${entryGroup.groupKey}-${groupIndex}`"
-                    class="rounded-xl border border-sidebar-border/70 bg-card p-4 dark:border-sidebar-border"
+                    class="rounded-xl border border-sidebar-border/70 bg-card dark:border-sidebar-border"
                 >
                     <!-- Group header -->
-                    <div class="mb-4 flex items-center justify-between border-b border-sidebar-border/70 pb-3">
-                        <div class="flex-col items-center gap-2">
-                            <div class="flex items-center gap-2">
-                                <h2 class="text-lg font-semibold">{{ entryGroup.groupLabel }}</h2>
-                                <span class="text-sm text-muted-foreground">
-                                    ({{ entryGroup.entries.length }} {{ entryGroup.entries.length === 1 ? 'entry' : 'entries' }})
-                                </span>
+                    <div 
+                        :class="[
+                            'sticky z-10 mb-4 flex-col items-center justify-between border-b border-sidebar-border/70 bg-card px-4 pb-3 pt-4',
+                            filtersOpen ? 'top-[200px]' : 'top-[88px]'
+                        ]"
+                    >
+                        <div class="flex items-center justify-between">
+                            <div class="flex-col items-center gap-2">
+                                <div class="flex items-center gap-2">
+                                    <h2 class="text-lg font-semibold">{{ group === 'date' ? formatDate(entryGroup.groupKey) : entryGroup.groupLabel }}</h2>
+                                    <span class="text-sm text-muted-foreground">
+                                        ({{ entryGroup.entries.length }} {{ entryGroup.entries.length === 1 ? 'entry' : 'entries' }})
+                                    </span>
+                                </div>
                             </div>
-                            <div class="flex items-center gap-1 text-muted-foreground">
-                                Net: <span class="text-muted-foreground font-medium">
-                                    {{ formatCurrency(String(entryGroup.totalIncome - entryGroup.totalPayable)) }}
-                                </span>
+                            <div class="flex items-end gap-1 text-xs">
+                                Net: <span class="text-muted-foreground font-medium" :class="getAmountColorByAmount(entryGroup.totalIncome - entryGroup.totalPayable)">
+                                        {{ formatCurrency(String(entryGroup.totalIncome - entryGroup.totalPayable)) }}
+                                    </span>
                             </div>
                         </div>
-                        <div class="flex flex-col items-end gap-1 text-xs">
-                            <div class="flex items-center gap-1 text-muted-foreground">
-                                Payable: <span class="text-red-600 dark:text-red-400 font-medium">{{ formatCurrency(String(entryGroup.totalPayable)) }}</span>
-                            </div>
-                            <div class="flex items-center gap-1 text-muted-foreground">
-                                Paid: <span class="text-green-600 dark:text-green-400 font-medium">{{ formatCurrency(String(entryGroup.totalPayment)) }}</span>
-                            </div>
-                            <div class="flex items-center gap-1 text-muted-foreground">
-                                Remaining: <span :class="entryGroup.totalRemaining > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'" class="font-medium">{{ formatCurrency(String(entryGroup.totalRemaining)) }}</span>
-                            </div>
+
+                        <div class="flex items-center justify-evenly gap-2">
+                           <div class="flex-col items-center gap-2 w-full">
+                                <div class="text-xs text-center text-muted-foreground">Payable</div>
+                                <div class="text-xs text-center text-red-600 dark:text-red-400 font-medium">{{ formatCurrency(String(entryGroup.totalPayable)) }}</div>
+                           </div>
+                           <div class="flex-col items-center gap-2 w-full" style="border-right: 1px solid #e0e0e0; border-left: 1px solid #e0e0e0;">
+                                <div class="text-xs text-center text-muted-foreground">Paid</div>
+                                <div class="text-xs text-center text-green-600 dark:text-green-400 font-medium">{{ formatCurrency(String(entryGroup.totalPayment)) }}</div>
+                           </div>
+                           <div class="flex-col items-center gap-2 w-full">
+                                <div class="text-xs text-center text-muted-foreground">Remaining</div>
+                                <div class="text-xs text-center text-red-600 dark:text-red-400 font-medium">{{ formatCurrency(String(entryGroup.totalRemaining)) }}</div>
+                           </div>
                         </div>
                     </div>
 
                     <!-- Entries in group -->
-                    <div class="grid gap-3">
+                    <div class="grid gap-3 px-4 pb-4">
                         <div
                             v-for="entry in entryGroup.entries"
                             :key="entry.id"
