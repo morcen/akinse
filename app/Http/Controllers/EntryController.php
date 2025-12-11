@@ -108,7 +108,7 @@ class EntryController extends Controller
     /**
      * Display grouped entries page.
      */
-    public function grouped(Request $request, ?string $group = null): JsonResponse
+    public function grouped(Request $request, ?string $group = null): JsonResponse|RedirectResponse
     {
         // Default to 'date' if not provided or invalid
         if (!$group || !in_array($group, ['date', 'category'])) {
