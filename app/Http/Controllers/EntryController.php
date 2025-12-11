@@ -19,24 +19,37 @@ class EntryController extends Controller
     /**
      * Display a listing of the entries.
      */
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, ?string $group = null): Response|RedirectResponse
     {
-        $entries = Entry::where('user_id', $request->user()->id)
-            ->with(['category'])
-            ->oldest('date')
-            ->oldest('created_at')
-            ->paginate(15);
+        // Default to 'date' if not provided or invalid
+        if (!$group || !in_array($group, ['date', 'category'])) {
+            $group = 'date';
+        }
 
-        // Format dates to Y-m-d format for consistent frontend handling
-        $entries->getCollection()->transform(function ($entry) {
-            if ($entry->date instanceof Carbon) {
-                $entry->setAttribute('date', $entry->date->toDateString());
-            }
-            $entry->setAttribute('total_paid', $entry->totalPaid);
-            return $entry;
-        });
+        if (!$request->has('date_from') || !$request->has('date_to')) {
+            // Default date range: ±3 days from current date
+            $today = Carbon::today();
+            $dateFrom = $today->copy()->subDays(3)->toDateString();
+            $dateTo = $today->copy()->addDays(3)->toDateString();
 
-        return response()->json($entries);
+            return redirect()->route('entries.grouped', ['group' => $group, 'date_from' => $dateFrom, 'date_to' => $dateTo]);
+        } else {
+            $dateFrom = $request->get('date_from');
+            $dateTo = $request->get('date_to');
+        }
+
+        $categories = Category::where('user_id', $request->user()->id)
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        return Inertia::render('GroupedEntries', [
+            'group' => $group,
+            'categories' => $categories,
+            'filters' => [
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+            ],
+        ]);
     }
 
     /**
@@ -95,12 +108,15 @@ class EntryController extends Controller
     /**
      * Display grouped entries page.
      */
-    public function grouped(Request $request, ?string $group = null): Response|RedirectResponse
+    public function grouped(Request $request, ?string $group = null): JsonResponse
     {
         // Default to 'date' if not provided or invalid
         if (!$group || !in_array($group, ['date', 'category'])) {
             $group = 'date';
         }
+
+        $dateFrom = $request->get('date_from');
+        $dateTo = $request->get('date_to');
 
         if (!$request->has('date_from') || !$request->has('date_to')) {
             // Default date range: ±3 days from current date
@@ -148,29 +164,36 @@ class EntryController extends Controller
         $groupedEntries = [];
         
         if ($group === 'date') {
+            // Group entries by date
             $grouped = $entries->groupBy('date');
-            foreach ($grouped as $date => $groupEntries) {
-                // total payable is the sum of the amounts of the expense entries
-                $totalPayable = $groupEntries->where('type', EntryTypesEnum::EXPENSE)->sum('amount');
+            
+            // Generate all dates in the range
+            $startDate = Carbon::parse($dateFrom);
+            $endDate = Carbon::parse($dateTo);
+            $currentDate = $startDate->copy();
+            
+            while ($currentDate->lte($endDate)) {
+                $dateString = $currentDate->toDateString();
+                $groupEntries = $grouped->get($dateString, collect());
                 
+                // Calculate totals
+                $totalPayable = $groupEntries->where('type', EntryTypesEnum::EXPENSE)->sum('amount');
                 $totalPayment = $groupEntries->sum(fn($e) => $e->totalPaid);
                 $totalRemaining = $totalPayable - $totalPayment;
-                
                 $totalIncome = $groupEntries->where('type', EntryTypesEnum::INCOME)->sum('amount');
+                
                 $groupedEntries[] = [
-                    'groupKey' => $date,
-                    'groupLabel' => Carbon::parse($date)->format('M d, Y'),
+                    'groupKey' => $dateString,
+                    'groupLabel' => $currentDate->format('M d, Y'),
                     'entries' => $groupEntries->values()->all(),
                     'totalPayable' => $totalPayable,
                     'totalPayment' => $totalPayment,
                     'totalRemaining' => $totalRemaining,
                     'totalIncome' => $totalIncome,
                 ];
+                
+                $currentDate->addDay();
             }
-            // Sort by date ascending
-            usort($groupedEntries, function ($a, $b) {
-                return strcmp($a['groupKey'], $b['groupKey']);
-            });
         } else {
             $grouped = $entries->groupBy(function ($entry) {
                 return $entry->category ? $entry->category->name : 'Uncategorized';
@@ -197,14 +220,9 @@ class EntryController extends Controller
             });
         }
 
-        $categories = Category::where('user_id', $request->user()->id)
-            ->orderBy('name')
-            ->get(['id', 'name']);
-
-        return Inertia::render('GroupedEntries', [
+        return response()->json([
             'groupedEntries' => $groupedEntries,
             'group' => $group,
-            'categories' => $categories,
             'filters' => [
                 'type' => $request->get('type', ''),
                 'category_id' => $request->get('category_id', ''),

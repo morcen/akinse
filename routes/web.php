@@ -24,6 +24,11 @@ Route::middleware(['auth'])->group(function () {
         ->middleware(['verified'])
         ->where('group', 'date|category')
         ->name('entries.grouped');
+
+    Route::get('entries/{group?}', [EntryController::class, 'index'])
+        ->middleware(['verified'])
+        ->where('group', 'date|category')
+        ->name('entries.index');
     
     Route::apiResource('entries', EntryController::class)->except(['index']);
     Route::post('entry-payments', [\App\Http\Controllers\EntryPaymentController::class, 'store'])

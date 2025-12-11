@@ -10,10 +10,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { entries as entriesRoute } from '@/routes';
-import { destroy, grouped } from '@/routes/entries';
+import { destroy } from '@/routes/entries';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router } from '@inertiajs/vue3';
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { CreditCard, Filter, CheckCircle } from 'lucide-vue-next';
 import AddEntryDialog from '@/components/AddEntryDialog.vue';
 import ViewEntryDialog from '@/components/ViewEntryDialog.vue';
@@ -50,7 +50,6 @@ interface GroupedEntry {
 }
 
 interface Props {
-    groupedEntries: GroupedEntry[];
     group: 'date' | 'category';
     categories: Category[];
     filters?: {
@@ -68,9 +67,20 @@ const props = withDefaults(defineProps<Props>(), {
         date_from: '',
         date_to: '',
     }),
-    groupedEntries: () => [],
     categories: () => [],
     group: 'date',
+});
+
+// Reactive state for API-fetched data
+const groupedEntries = ref<GroupedEntry[]>([]);
+const isLoading = ref(false);
+const isLoadingMore = ref(false);
+const isLoadMoreInProgress = ref(false);
+const apiFilters = ref({
+    type: props.filters?.type || '',
+    category_id: props.filters?.category_id || '',
+    date_from: props.filters?.date_from || '',
+    date_to: props.filters?.date_to || '',
 });
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -247,16 +257,27 @@ const confirmDelete = (entry: Entry) => {
 };
 
 // Delete entry
-const handleDelete = () => {
+const handleDelete = async () => {
     if (!entryToDelete.value) return;
     
-    router.delete(destroy.url({ entry: entryToDelete.value.id }), {
-        preserveScroll: true,
-        onSuccess: () => {
-            deleteDialogOpen.value = false;
-            entryToDelete.value = null;
-        },
-    });
+    try {
+        const response = await fetch(destroy.url({ entry: entryToDelete.value.id }), {
+            method: 'DELETE',
+            headers: { Accept: 'application/json' },
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to delete: ${response.status}`);
+        }
+
+        deleteDialogOpen.value = false;
+        entryToDelete.value = null;
+        
+        // Refetch data after deletion
+        await fetchGroupedEntries();
+    } catch (error) {
+        console.error('Error deleting entry:', error);
+    }
 };
 
 // Open payment modal
@@ -272,23 +293,256 @@ const dateTo = ref(props.filters.date_to || '');
 // Filter dialog state - closed by default
 const filtersDialogOpen = ref(false);
 
-// Watch for prop changes to update date range
+// Watch for prop changes to update date range and refetch if needed
 watch(() => props.filters, (newFilters) => {
-    dateFrom.value = newFilters?.date_from || '';
-    dateTo.value = newFilters?.date_to || '';
+    const newDateFrom = newFilters?.date_from || '';
+    const newDateTo = newFilters?.date_to || '';
+    const filtersChanged = 
+        dateFrom.value !== newDateFrom || 
+        dateTo.value !== newDateTo ||
+        apiFilters.value.type !== (newFilters?.type || '') ||
+        apiFilters.value.category_id !== (newFilters?.category_id || '');
+    
+    dateFrom.value = newDateFrom;
+    dateTo.value = newDateTo;
+    apiFilters.value = {
+        type: newFilters?.type || '',
+        category_id: newFilters?.category_id || '',
+        date_from: newDateFrom,
+        date_to: newDateTo,
+    };
+    
+    // Refetch if filters actually changed (but not on initial mount to avoid double fetch)
+    if (filtersChanged && groupedEntries.value.length > 0) {
+        fetchGroupedEntries();
+    }
 }, { immediate: true, deep: true });
+
+// Watch for group changes and refetch
+watch(() => props.group, (newGroup) => {
+    // Remove scroll listener if switching away from date group
+    if (newGroup !== 'date') {
+        window.removeEventListener('scroll', handleScroll);
+    } else {
+        // Add scroll listener when switching to date group
+        window.addEventListener('scroll', handleScroll);
+    }
+    fetchGroupedEntries();
+});
+
+// Fetch grouped entries from API
+const fetchGroupedEntries = async () => {
+    isLoading.value = true;
+    try {
+        const params = new URLSearchParams();
+        if (apiFilters.value.date_from) {
+            params.append('date_from', apiFilters.value.date_from);
+        }
+        if (apiFilters.value.date_to) {
+            params.append('date_to', apiFilters.value.date_to);
+        }
+        if (apiFilters.value.type) {
+            params.append('type', apiFilters.value.type);
+        }
+        if (apiFilters.value.category_id) {
+            params.append('category_id', apiFilters.value.category_id);
+        }
+
+        const url = `/entries/grouped/${props.group}${params.toString() ? '?' + params.toString() : ''}`;
+        const response = await fetch(url, {
+            headers: { Accept: 'application/json' },
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch: ${response.status}`);
+        }
+
+        const data = await response.json();
+        groupedEntries.value = data.groupedEntries || [];
+        
+        // Update filters from API response
+        if (data.filters) {
+            apiFilters.value = {
+                type: data.filters.type || '',
+                category_id: data.filters.category_id || '',
+                date_from: data.filters.date_from || '',
+                date_to: data.filters.date_to || '',
+            };
+            dateFrom.value = data.filters.date_from || '';
+            dateTo.value = data.filters.date_to || '';
+        }
+    } catch (error) {
+        console.error('Error fetching grouped entries:', error);
+        groupedEntries.value = [];
+    } finally {
+        isLoading.value = false;
+    }
+};
 
 // Submit date range filter
 const submitDateRange = () => {
-    router.get(grouped.url({ group: props.group }), {
-        date_from: dateFrom.value || undefined,
-        date_to: dateTo.value || undefined,
-    }, {
-        onSuccess: () => {
-            filtersDialogOpen.value = false;
-        },
-    });
+    apiFilters.value.date_from = dateFrom.value;
+    apiFilters.value.date_to = dateTo.value;
+    fetchGroupedEntries();
+    filtersDialogOpen.value = false;
 };
+
+// Get the latest date from grouped entries
+const getLatestDate = (): string | null => {
+    if (groupedEntries.value.length === 0 || props.group !== 'date') {
+        return null;
+    }
+    
+    // Find the latest date from groupKey (format: "YYYY-MM-DD 00:00:00")
+    const dates = groupedEntries.value
+        .map(group => group.groupKey)
+        .filter(key => key && typeof key === 'string')
+        .map(key => {
+            // Extract date part (YYYY-MM-DD)
+            const datePart = key.split(' ')[0];
+            return datePart;
+        })
+        .filter(date => date.match(/^\d{4}-\d{2}-\d{2}$/));
+    
+    if (dates.length === 0) {
+        return null;
+    }
+    
+    // Sort dates and get the latest
+    dates.sort((a, b) => b.localeCompare(a));
+    return dates[0];
+};
+
+// Add days to a date string (YYYY-MM-DD)
+const addDaysToDate = (dateString: string, days: number): string => {
+    const date = parseDateLocal(dateString);
+    date.setDate(date.getDate() + days);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+// Load the next 3 days after the latest date
+const loadNextDays = async () => {
+    // Only work for date grouping
+    if (props.group !== 'date') {
+        return;
+    }
+    
+    // Prevent duplicate requests
+    if (isLoadMoreInProgress.value || isLoadingMore.value) {
+        return;
+    }
+    
+    const latestDate = getLatestDate();
+    if (!latestDate) {
+        return;
+    }
+    
+    isLoadMoreInProgress.value = true;
+    isLoadingMore.value = true;
+    
+    try {
+        // Calculate next 3 dates: latestDate+1, latestDate+2, latestDate+3
+        const nextDate1 = addDaysToDate(latestDate, 1);
+        const nextDate3 = addDaysToDate(latestDate, 3);
+        
+        // Build API request with date range
+        const params = new URLSearchParams();
+        params.append('date_from', nextDate1);
+        params.append('date_to', nextDate3);
+        
+        if (apiFilters.value.type) {
+            params.append('type', apiFilters.value.type);
+        }
+        if (apiFilters.value.category_id) {
+            params.append('category_id', apiFilters.value.category_id);
+        }
+        
+        const url = `/entries/grouped/${props.group}?${params.toString()}`;
+        const response = await fetch(url, {
+            headers: { Accept: 'application/json' },
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to fetch: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const newEntries = data.groupedEntries || [];
+        
+        if (newEntries.length > 0) {
+            // Create a map of existing groupKeys to avoid duplicates
+            const existingKeys = new Set(groupedEntries.value.map(g => g.groupKey));
+            
+            // Filter out duplicates and append new entries
+            const uniqueNewEntries = newEntries.filter(
+                (entry: GroupedEntry) => !existingKeys.has(entry.groupKey)
+            );
+            
+            // Append new entries to existing ones
+            groupedEntries.value = [...groupedEntries.value, ...uniqueNewEntries];
+            
+            // Update dateTo to include the newly loaded dates so completeGroupedEntries includes them
+            if (dateTo.value) {
+                const currentDateTo = parseDateLocal(dateTo.value);
+                const newDateTo = parseDateLocal(nextDate3);
+                if (newDateTo > currentDateTo) {
+                    const year = newDateTo.getFullYear();
+                    const month = String(newDateTo.getMonth() + 1).padStart(2, '0');
+                    const day = String(newDateTo.getDate()).padStart(2, '0');
+                    dateTo.value = `${year}-${month}-${day}`;
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading next days:', error);
+    } finally {
+        isLoadingMore.value = false;
+        isLoadMoreInProgress.value = false;
+    }
+};
+
+// Handle scroll event for infinite loading
+const handleScroll = () => {
+    // Only work for date grouping
+    if (props.group !== 'date') {
+        return;
+    }
+    
+    // Prevent loading if already in progress
+    if (isLoadMoreInProgress.value || isLoadingMore.value) {
+        return;
+    }
+    
+    // Get scroll position
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const windowHeight = window.innerHeight;
+    const documentHeight = document.documentElement.scrollHeight;
+    
+    // Check if within 300px of bottom
+    const distanceFromBottom = documentHeight - (scrollTop + windowHeight);
+    
+    if (distanceFromBottom <= 300) {
+        loadNextDays();
+    }
+};
+
+// Fetch data on mount
+onMounted(() => {
+    fetchGroupedEntries();
+    
+    // Add scroll event listener for infinite loading
+    if (props.group === 'date') {
+        window.addEventListener('scroll', handleScroll);
+    }
+});
+
+// Clean up scroll listener
+onUnmounted(() => {
+    window.removeEventListener('scroll', handleScroll);
+});
 
 // Generate all dates in a range
 const generateDateRange = (startDate: string, endDate: string): string[] => {
@@ -317,7 +571,7 @@ const generateDateRange = (startDate: string, endDate: string): string[] => {
 const completeGroupedEntries = computed(() => {
     // Only process if group is 'date' and we have date filters
     if (props.group !== 'date' || !dateFrom.value || !dateTo.value) {
-        return props.groupedEntries;
+        return groupedEntries.value;
     }
     
     // Generate all dates in the range
@@ -325,7 +579,7 @@ const completeGroupedEntries = computed(() => {
     
     // Create a map of existing groups by date
     const existingGroupsMap = new Map<string, GroupedEntry>();
-    props.groupedEntries.forEach(group => {
+    groupedEntries.value.forEach(group => {
         existingGroupsMap.set(group.groupKey, group);
     });
     
@@ -358,7 +612,7 @@ const shouldShowGroupedEntries = computed(() => {
         return !!(dateFrom.value && dateTo.value);
     }
     // For other groupings, show if we have entries
-    return props.groupedEntries && props.groupedEntries.length > 0;
+    return groupedEntries.value && groupedEntries.value.length > 0;
 });
 </script>
 
@@ -440,9 +694,17 @@ const shouldShowGroupedEntries = computed(() => {
                 </DialogContent>
             </Dialog>
 
+            <!-- Loading state -->
+            <div
+                v-if="isLoading"
+                class="mx-4 rounded-xl border border-sidebar-border/70 bg-card p-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
+            >
+                Loading entries...
+            </div>
+
             <!-- No entries message (only show if no date range is set for date grouping) -->
             <div
-                v-if="!shouldShowGroupedEntries"
+                v-else-if="!shouldShowGroupedEntries"
                 class="mx-4 rounded-xl border border-sidebar-border/70 bg-card p-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
             >
                 <template v-if="group === 'date' && (!dateFrom || !dateTo)">
@@ -574,12 +836,26 @@ const shouldShowGroupedEntries = computed(() => {
                 </div>
             </div>
 
+            <!-- Loading more spinner -->
+            <div
+                v-if="isLoadingMore && group === 'date'"
+                class="mx-4 rounded-xl border border-sidebar-border/70 bg-card p-8 text-center dark:border-sidebar-border"
+            >
+                <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Loading more entries...</span>
+                </div>
+            </div>
+
             <!-- Add Entry Dialog -->
             <AddEntryDialog
                 v-model:open="addDialogOpen"
                 :categories="categories"
                 :initial-date="entryDateForAdd"
-                @close="addDialogOpen = false"
+                @close="() => { addDialogOpen = false; fetchGroupedEntries(); }"
             />
 
             <!-- View Entry Dialog -->
@@ -595,7 +871,7 @@ const shouldShowGroupedEntries = computed(() => {
                 v-model:open="editDialogOpen"
                 :entry="editingEntry"
                 :categories="categories"
-                @close="editDialogOpen = false"
+                @close="() => { editDialogOpen = false; fetchGroupedEntries(); }"
                 @delete="confirmDelete(editingEntry!)"
             />
 
@@ -609,7 +885,7 @@ const shouldShowGroupedEntries = computed(() => {
             <RecordPaymentDialog
                 v-model:open="paymentDialogOpen"
                 :entry="entryForPayment"
-                @close="paymentDialogOpen = false"
+                @close="() => { paymentDialogOpen = false; fetchGroupedEntries(); }"
             />
         </div>
     </AppLayout>
