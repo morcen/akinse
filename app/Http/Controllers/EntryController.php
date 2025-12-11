@@ -19,7 +19,7 @@ class EntryController extends Controller
     /**
      * Display a listing of the entries.
      */
-    public function index(Request $request, ?string $group = null): Response|RedirectResponse
+    public function index(Request $request, ?string $group = null): Response
     {
         // Default to 'date' if not provided or invalid
         if (!$group || !in_array($group, ['date', 'category'])) {
@@ -31,8 +31,6 @@ class EntryController extends Controller
             $today = Carbon::today();
             $dateFrom = $today->copy()->subDays(3)->toDateString();
             $dateTo = $today->copy()->addDays(3)->toDateString();
-
-            return redirect()->route('entries.grouped', ['group' => $group, 'date_from' => $dateFrom, 'date_to' => $dateTo]);
         } else {
             $dateFrom = $request->get('date_from');
             $dateTo = $request->get('date_to');
@@ -107,9 +105,16 @@ class EntryController extends Controller
 
     /**
      * Display grouped entries page.
+     * This endpoint is for API calls only (returns JSON).
+     * For Inertia navigation, use the index() method instead.
      */
-    public function grouped(Request $request, ?string $group = null): JsonResponse|RedirectResponse
+    public function grouped(Request $request, ?string $group = null): JsonResponse
     {
+        // This endpoint should only be used for API calls, not Inertia requests
+        if ($request->header('X-Inertia')) {
+            abort(400, 'This endpoint is for API calls only. Use /entries/{group} for Inertia navigation.');
+        }
+
         // Default to 'date' if not provided or invalid
         if (!$group || !in_array($group, ['date', 'category'])) {
             $group = 'date';
@@ -123,8 +128,6 @@ class EntryController extends Controller
             $today = Carbon::today();
             $dateFrom = $today->copy()->subDays(3)->toDateString();
             $dateTo = $today->copy()->addDays(3)->toDateString();
-
-            return redirect()->route('entries.grouped', ['group' => $group, 'date_from' => $dateFrom, 'date_to' => $dateTo]);
         } else {
             $dateFrom = $request->get('date_from');
             $dateTo = $request->get('date_to');
@@ -162,26 +165,26 @@ class EntryController extends Controller
 
         // Group entries
         $groupedEntries = [];
-        
+
         if ($group === 'date') {
             // Group entries by date
             $grouped = $entries->groupBy('date');
-            
+
             // Generate all dates in the range
             $startDate = Carbon::parse($dateFrom);
             $endDate = Carbon::parse($dateTo);
             $currentDate = $startDate->copy();
-            
+
             while ($currentDate->lte($endDate)) {
-                $dateString = $currentDate->toDateString();
+                $dateString = $currentDate->format('Y-m-d 00:00:00');
                 $groupEntries = $grouped->get($dateString, collect());
-                
+
                 // Calculate totals
                 $totalPayable = $groupEntries->where('type', EntryTypesEnum::EXPENSE)->sum('amount');
-                $totalPayment = $groupEntries->sum(fn($e) => $e->totalPaid);
+                $totalPayment = $groupEntries->sum(fn ($e) => $e->totalPaid);
                 $totalRemaining = $totalPayable - $totalPayment;
                 $totalIncome = $groupEntries->where('type', EntryTypesEnum::INCOME)->sum('amount');
-                
+
                 $groupedEntries[] = [
                     'groupKey' => $dateString,
                     'groupLabel' => $currentDate->format('M d, Y'),
@@ -191,7 +194,7 @@ class EntryController extends Controller
                     'totalRemaining' => $totalRemaining,
                     'totalIncome' => $totalIncome,
                 ];
-                
+
                 $currentDate->addDay();
             }
         } else {
@@ -200,7 +203,7 @@ class EntryController extends Controller
             });
             foreach ($grouped as $categoryName => $groupEntries) {
                 $totalPayable = $groupEntries->where('type', EntryTypesEnum::EXPENSE)->sum('amount');
-                $totalPayment = $groupEntries->sum(fn($e) => $e->totalPaid);
+                $totalPayment = $groupEntries->sum(fn ($e) => $e->totalPaid);
                 $totalRemaining = $totalPayable - $totalPayment;
                 $totalIncome = $groupEntries->where('type', EntryTypesEnum::INCOME)->sum('amount');
 
@@ -242,19 +245,19 @@ class EntryController extends Controller
 
         // Handle category creation if category_name is provided
         $categoryId = $validated['category_id'] ?? null;
-        
+
         if (!$categoryId && isset($validated['category_name'])) {
             $categoryName = trim($validated['category_name']);
-            
+
             if (empty($categoryName)) {
                 abort(422, 'Category name cannot be empty.');
             }
-            
+
             // Check if category already exists for this user (case-insensitive)
             $category = Category::where('user_id', $user->id)
                 ->whereRaw('LOWER(name) = ?', [strtolower($categoryName)])
                 ->first();
-            
+
             if (!$category) {
                 // Create new category
                 $category = Category::create([
@@ -262,7 +265,7 @@ class EntryController extends Controller
                     'name' => $categoryName,
                 ]);
             }
-            
+
             $categoryId = $category->id;
         }
 
@@ -330,19 +333,19 @@ class EntryController extends Controller
 
         // Handle category creation if category_name is provided
         $categoryId = $validated['category_id'] ?? null;
-        
+
         if (!$categoryId && isset($validated['category_name'])) {
             $categoryName = trim($validated['category_name']);
-            
+
             if (empty($categoryName)) {
                 abort(422, 'Category name cannot be empty.');
             }
-            
+
             // Check if category already exists for this user (case-insensitive)
             $category = Category::where('user_id', $user->id)
                 ->whereRaw('LOWER(name) = ?', [strtolower($categoryName)])
                 ->first();
-            
+
             if (!$category) {
                 // Create new category
                 $category = Category::create([
@@ -350,7 +353,7 @@ class EntryController extends Controller
                     'name' => $categoryName,
                 ]);
             }
-            
+
             $categoryId = $category->id;
         }
 
