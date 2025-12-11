@@ -19,12 +19,12 @@ const tabs: TabItem[] = [
     },
     {
         title: 'Entries',
-        href: entriesRoutes.grouped({ group: 'date' }).url,
+        href: entriesRoutes.index({ group: 'date' }).url,
         icon: Wallet,
     },
     {
         title: 'Categories',
-        href: entriesRoutes.grouped({ group: 'category' }).url,
+        href: entriesRoutes.index({ group: 'category' }).url,
         icon: Tag,
     },
     {
