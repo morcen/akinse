@@ -136,7 +136,6 @@ class EntryController extends Controller
         $query = Entry::where('user_id', $request->user()->id)
             ->with(['category']);
 
-
         $query->where('date', '>=', $dateFrom)
             ->where('date', '<=', $dateTo);
 
@@ -168,7 +167,9 @@ class EntryController extends Controller
 
         if ($group === 'date') {
             // Group entries by date
-            $grouped = $entries->groupBy('date');
+            $grouped = $entries->groupBy(function ($entry) {
+                return $entry->date->format('Y-m-d');
+            });
 
             // Generate all dates in the range
             $startDate = Carbon::parse($dateFrom);
@@ -176,7 +177,7 @@ class EntryController extends Controller
             $currentDate = $startDate->copy();
 
             while ($currentDate->lte($endDate)) {
-                $dateString = $currentDate->format('Y-m-d 00:00:00');
+                $dateString = $currentDate->format('Y-m-d');
                 $groupEntries = $grouped->get($dateString, collect());
 
                 // Calculate totals

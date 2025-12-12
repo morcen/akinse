@@ -13,7 +13,7 @@ import { entries as entriesRoute } from '@/routes';
 import { destroy } from '@/routes/entries';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router } from '@inertiajs/vue3';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { CreditCard, Filter, CheckCircle } from 'lucide-vue-next';
 import AddEntryDialog from '@/components/AddEntryDialog.vue';
 import ViewEntryDialog from '@/components/ViewEntryDialog.vue';
@@ -76,6 +76,9 @@ const groupedEntries = ref<GroupedEntry[]>([]);
 const isLoading = ref(false);
 const isLoadingMore = ref(false);
 const isLoadMoreInProgress = ref(false);
+const isLoadingPrevious = ref(false);
+const isLoadPreviousInProgress = ref(false);
+const isFirstLoad = ref(true);
 const apiFilters = ref({
     type: props.filters?.type || '',
     category_id: props.filters?.category_id || '',
@@ -371,6 +374,18 @@ const fetchGroupedEntries = async () => {
             dateFrom.value = data.filters.date_from || '';
             dateTo.value = data.filters.date_to || '';
         }
+        
+        // Scroll to current date on first load (only for date grouping)
+        if (isFirstLoad.value && props.group === 'date' && groupedEntries.value.length > 0) {
+            await nextTick();
+            // Use requestAnimationFrame to ensure DOM is fully painted before scrolling
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    scrollToCurrentDate();
+                });
+            });
+            isFirstLoad.value = false;
+        }
     } catch (error) {
         console.error('Error fetching grouped entries:', error);
         groupedEntries.value = [];
@@ -393,14 +408,13 @@ const getLatestDate = (): string | null => {
         return null;
     }
     
-    // Find the latest date from groupKey (format: "YYYY-MM-DD 00:00:00")
+    // Find the latest date from groupKey (format: "YYYY-MM-DD")
     const dates = groupedEntries.value
         .map(group => group.groupKey)
         .filter(key => key && typeof key === 'string')
         .map(key => {
             // Extract date part (YYYY-MM-DD)
-            const datePart = key.split(' ')[0];
-            return datePart;
+            return key;
         })
         .filter(date => date.match(/^\d{4}-\d{2}-\d{2}$/));
     
@@ -410,6 +424,31 @@ const getLatestDate = (): string | null => {
     
     // Sort dates and get the latest
     dates.sort((a, b) => b.localeCompare(a));
+    return dates[0];
+};
+
+// Get the earliest date from grouped entries
+const getEarliestDate = (): string | null => {
+    if (groupedEntries.value.length === 0 || props.group !== 'date') {
+        return null;
+    }
+    
+    // Find the earliest date from groupKey (format: "YYYY-MM-DD")
+    const dates = groupedEntries.value
+        .map(group => group.groupKey)
+        .filter(key => key && typeof key === 'string')
+        .map(key => {
+            // Extract date part (YYYY-MM-DD)
+            return key;
+        })
+        .filter(date => date.match(/^\d{4}-\d{2}-\d{2}$/));
+    
+    if (dates.length === 0) {
+        return null;
+    }
+    
+    // Sort dates and get the earliest
+    dates.sort((a, b) => a.localeCompare(b));
     return dates[0];
 };
 
@@ -504,15 +543,131 @@ const loadNextDays = async () => {
     }
 };
 
-// Handle scroll event for infinite loading
-const handleScroll = () => {
+// Load the previous 3 days before the earliest date
+const loadPreviousDays = async () => {
     // Only work for date grouping
     if (props.group !== 'date') {
         return;
     }
     
-    // Prevent loading if already in progress
-    if (isLoadMoreInProgress.value || isLoadingMore.value) {
+    // Prevent duplicate requests
+    if (isLoadPreviousInProgress.value || isLoadingPrevious.value) {
+        return;
+    }
+    
+    const earliestDate = getEarliestDate();
+    if (!earliestDate) {
+        return;
+    }
+    
+    isLoadPreviousInProgress.value = true;
+    isLoadingPrevious.value = true;
+    
+    // Save current scroll position and document height before loading
+    const scrollTopBefore = window.pageYOffset || document.documentElement.scrollTop;
+    const documentHeightBefore = document.documentElement.scrollHeight;
+    
+    // Also save reference element position for more accurate positioning
+    const referenceElement = document.getElementById(earliestDate);
+    const referenceElementOffsetBefore = referenceElement ? referenceElement.offsetTop : null;
+    
+    try {
+        // Calculate previous 3 dates: earliestDate-3, earliestDate-2, earliestDate-1
+        const prevDate3 = addDaysToDate(earliestDate, -3);
+        const prevDate1 = addDaysToDate(earliestDate, -1);
+        
+        // Build API request with date range
+        const params = new URLSearchParams();
+        params.append('date_from', prevDate3);
+        params.append('date_to', prevDate1);
+        
+        if (apiFilters.value.type) {
+            params.append('type', apiFilters.value.type);
+        }
+        if (apiFilters.value.category_id) {
+            params.append('category_id', apiFilters.value.category_id);
+        }
+        
+        const url = `/entries/grouped/${props.group}?${params.toString()}`;
+        const response = await fetch(url, {
+            headers: { Accept: 'application/json' },
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to fetch: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const newEntries = data.groupedEntries || [];
+        
+        if (newEntries.length > 0) {
+            // Create a map of existing groupKeys to avoid duplicates
+            const existingKeys = new Set(groupedEntries.value.map(g => g.groupKey));
+            
+            // Filter out duplicates and prepend new entries
+            const uniqueNewEntries = newEntries.filter(
+                (entry: GroupedEntry) => !existingKeys.has(entry.groupKey)
+            );
+            
+            // Prepend new entries to existing ones (maintain date order)
+            groupedEntries.value = [...uniqueNewEntries, ...groupedEntries.value];
+            
+            // Update dateFrom to include the newly loaded dates so completeGroupedEntries includes them
+            if (dateFrom.value) {
+                const currentDateFrom = parseDateLocal(dateFrom.value);
+                const newDateFrom = parseDateLocal(prevDate3);
+                if (newDateFrom < currentDateFrom) {
+                    const year = newDateFrom.getFullYear();
+                    const month = String(newDateFrom.getMonth() + 1).padStart(2, '0');
+                    const day = String(newDateFrom.getDate()).padStart(2, '0');
+                    dateFrom.value = `${year}-${month}-${day}`;
+                }
+            }
+            
+            // Wait for DOM to update, then adjust scroll position
+            await nextTick();
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    // Calculate height difference using document height
+                    const documentHeightAfter = document.documentElement.scrollHeight;
+                    const heightDifference = documentHeightAfter - documentHeightBefore;
+                    
+                    // Use reference element if available for more accurate positioning
+                    if (referenceElementOffsetBefore !== null) {
+                        const referenceElementAfter = document.getElementById(earliestDate);
+                        if (referenceElementAfter) {
+                            const referenceElementOffsetAfter = referenceElementAfter.offsetTop;
+                            const elementHeightDifference = referenceElementOffsetAfter - referenceElementOffsetBefore;
+                            
+                            // Adjust scroll position to maintain visual position relative to reference element
+                            window.scrollTo({
+                                top: scrollTopBefore + elementHeightDifference,
+                                behavior: 'auto' // Use 'auto' to prevent smooth scroll animation during adjustment
+                            });
+                            return;
+                        }
+                    }
+                    
+                    // Fallback: adjust scroll position by document height difference
+                    window.scrollTo({
+                        top: scrollTopBefore + heightDifference,
+                        behavior: 'auto' // Use 'auto' to prevent smooth scroll animation during adjustment
+                    });
+                });
+            });
+        }
+    } catch (error) {
+        console.error('Error loading previous days:', error);
+    } finally {
+        isLoadingPrevious.value = false;
+        isLoadPreviousInProgress.value = false;
+    }
+};
+
+// Handle scroll event for infinite loading
+const handleScroll = () => {
+    // Only work for date grouping
+    if (props.group !== 'date') {
         return;
     }
     
@@ -521,11 +676,21 @@ const handleScroll = () => {
     const windowHeight = window.innerHeight;
     const documentHeight = document.documentElement.scrollHeight;
     
+    // Check if within 300px of top
+    if (scrollTop <= 300) {
+        // Prevent loading if already in progress
+        if (!isLoadPreviousInProgress.value && !isLoadingPrevious.value) {
+            loadPreviousDays();
+        }
+    }
+    
     // Check if within 300px of bottom
     const distanceFromBottom = documentHeight - (scrollTop + windowHeight);
-    
     if (distanceFromBottom <= 300) {
-        loadNextDays();
+        // Prevent loading if already in progress
+        if (!isLoadMoreInProgress.value && !isLoadingMore.value) {
+            loadNextDays();
+        }
     }
 };
 
@@ -544,6 +709,35 @@ onUnmounted(() => {
     window.removeEventListener('scroll', handleScroll);
 });
 
+// Scroll to current date's group element
+const scrollToCurrentDate = () => {
+    if (props.group !== 'date') {
+        return;
+    }
+    
+    // Format current date as YYYY-MM-DD
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const currentDateString = `${year}-${month}-${day}`;
+    
+    // Find the element with the current date as id
+    const currentDateElement = document.getElementById(currentDateString);
+    
+    if (currentDateElement) {
+        // Scroll to the element, accounting for sticky header
+        const headerOffset = 100; // Approximate height of sticky header
+        const elementTop = currentDateElement.offsetTop;
+        const offsetPosition = elementTop - headerOffset;
+        
+        window.scrollTo({
+            top: offsetPosition,
+            behavior: 'smooth'
+        });
+    }
+};
+
 // Generate all dates in a range
 const generateDateRange = (startDate: string, endDate: string): string[] => {
     const dates: string[] = [];
@@ -560,7 +754,7 @@ const generateDateRange = (startDate: string, endDate: string): string[] => {
         const year = current.getFullYear();
         const month = String(current.getMonth() + 1).padStart(2, '0');
         const day = String(current.getDate()).padStart(2, '0');
-        dates.push(`${year}-${month}-${day} 00:00:00`);
+        dates.push(`${year}-${month}-${day}`);
         current.setDate(current.getDate() + 1);
     }
     
@@ -717,10 +911,24 @@ const shouldShowGroupedEntries = computed(() => {
 
             <!-- Grouped entries cards -->
             <div v-else class="flex flex-col gap-4 px-4 pb-4">
+                <!-- Loading previous spinner -->
+                <div
+                    v-if="isLoadingPrevious && group === 'date'"
+                    class="rounded-xl border border-sidebar-border/70 bg-card p-8 text-center dark:border-sidebar-border"
+                >
+                    <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                        <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Loading previous entries...</span>
+                    </div>
+                </div>
                 <div
                     v-for="(entryGroup, groupIndex) in completeGroupedEntries"
                     :key="`group-${entryGroup.groupKey}-${groupIndex}`"
                     class="rounded-xl border border-sidebar-border/70 bg-card dark:border-sidebar-border"
+                    :id="entryGroup.groupKey"
                 >
                     <!-- Group header -->
                     <div 
