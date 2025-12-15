@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { entries as entriesRoute } from '@/routes';
 import { destroy, index as entriesIndex } from '@/routes/entries';
@@ -55,7 +56,7 @@ interface Props {
     categories: Category[];
     filters?: {
         type: string;
-        category_id: string;
+        category_id: string | number[];
         date_from: string;
         date_to: string;
     };
@@ -80,12 +81,24 @@ const isLoadMoreInProgress = ref(false);
 const isLoadingPrevious = ref(false);
 const isLoadPreviousInProgress = ref(false);
 const isFirstLoad = ref(true);
+
+// Normalize category_id to array format
+const normalizeCategoryId = (value: string | number[] | undefined): number[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(id => Number(id));
+    if (value === '') return [];
+    return [Number(value)];
+};
+
 const apiFilters = ref({
     type: props.filters?.type || '',
-    category_id: props.filters?.category_id || '',
+    category_id: normalizeCategoryId(props.filters?.category_id),
     date_from: props.filters?.date_from || '',
     date_to: props.filters?.date_to || '',
 });
+
+// Selected categories for the filter dialog (array of category IDs)
+const selectedCategories = ref<number[]>(apiFilters.value.category_id);
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -308,29 +321,37 @@ const dateTo = ref(props.filters.date_to || '');
 // Filter dialog state - closed by default
 const filtersDialogOpen = ref(false);
 
-// Watch for prop changes to update date range and refetch if needed
+// Watch for dialog open to initialize dialog state with current filters
+watch(filtersDialogOpen, (isOpen) => {
+    if (isOpen) {
+        // When dialog opens, initialize dialog state with current apiFilters
+        dateFrom.value = apiFilters.value.date_from;
+        dateTo.value = apiFilters.value.date_to;
+        selectedCategories.value = [...apiFilters.value.category_id];
+    }
+});
+
+// Watch for prop changes to update dialog state (but don't trigger API calls)
+// API calls should only happen when user clicks "Apply Filter"
 watch(() => props.filters, (newFilters) => {
     const newDateFrom = newFilters?.date_from || '';
     const newDateTo = newFilters?.date_to || '';
-    const filtersChanged = 
-        dateFrom.value !== newDateFrom || 
-        dateTo.value !== newDateTo ||
-        apiFilters.value.type !== (newFilters?.type || '') ||
-        apiFilters.value.category_id !== (newFilters?.category_id || '');
+    const newCategoryId = normalizeCategoryId(newFilters?.category_id);
     
+    // Only update dialog state from props (e.g., when navigating back/forward)
+    // Don't trigger API calls here - that should only happen on "Apply Filter"
     dateFrom.value = newDateFrom;
     dateTo.value = newDateTo;
+    selectedCategories.value = newCategoryId;
+    
+    // Update apiFilters to match props (for initial load and external changes)
+    // But don't call fetchGroupedEntries here - it will be called on mount
     apiFilters.value = {
         type: newFilters?.type || '',
-        category_id: newFilters?.category_id || '',
+        category_id: newCategoryId,
         date_from: newDateFrom,
         date_to: newDateTo,
     };
-    
-    // Refetch if filters actually changed (but not on initial mount to avoid double fetch)
-    if (filtersChanged && groupedEntries.value.length > 0) {
-        fetchGroupedEntries();
-    }
 }, { immediate: true, deep: true });
 
 // Watch for group changes and refetch
@@ -359,18 +380,23 @@ const fetchGroupedEntries = async () => {
         if (apiFilters.value.type) {
             params.append('type', apiFilters.value.type);
         }
-        if (apiFilters.value.category_id) {
-            params.append('category_id', apiFilters.value.category_id);
+        // Append each category ID separately to create an array
+        if (apiFilters.value.category_id && apiFilters.value.category_id.length > 0) {
+            apiFilters.value.category_id.forEach((id) => {
+                params.append('category_id[]', String(id));
+            });
         }
 
         let url: string;
         if (props.group === 'date') {
             // Use API entries endpoint for date grouping
-            const queryObj: Record<string, string> = {};
+            // For arrays, we need to build the query string manually
+            const queryParts: string[] = [];
             params.forEach((value, key) => {
-                queryObj[key] = value;
+                queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
             });
-            url = entriesIndex.url({ query: queryObj });
+            const queryString = queryParts.length > 0 ? '?' + queryParts.join('&') : '';
+            url = entriesIndex.url().split('?')[0] + queryString;
         } else {
             // Use category grouped endpoint for category grouping
             url = `/categories/grouped/entries${params.toString() ? '?' + params.toString() : ''}`;
@@ -395,10 +421,11 @@ const fetchGroupedEntries = async () => {
         if (data.filters) {
             apiFilters.value = {
                 type: data.filters.type || '',
-                category_id: data.filters.category_id || '',
+                category_id: normalizeCategoryId(data.filters.category_id),
                 date_from: data.filters.date_from || '',
                 date_to: data.filters.date_to || '',
             };
+            selectedCategories.value = apiFilters.value.category_id;
             dateFrom.value = data.filters.date_from || '';
             dateTo.value = data.filters.date_to || '';
         }
@@ -422,12 +449,22 @@ const fetchGroupedEntries = async () => {
     }
 };
 
-// Submit date range filter
-const submitDateRange = () => {
+// Submit filters (date range and categories)
+const submitFilters = () => {
+    // Update apiFilters with dialog values
     apiFilters.value.date_from = dateFrom.value;
     apiFilters.value.date_to = dateTo.value;
+    apiFilters.value.category_id = selectedCategories.value;
+    // Now trigger the API call
     fetchGroupedEntries();
     filtersDialogOpen.value = false;
+};
+
+// Reset dialog state to current apiFilters when dialog is closed/cancelled
+const resetDialogState = () => {
+    dateFrom.value = apiFilters.value.date_from;
+    dateTo.value = apiFilters.value.date_to;
+    selectedCategories.value = [...apiFilters.value.category_id];
 };
 
 // Get the latest date from grouped entries
@@ -523,17 +560,22 @@ const loadNextDays = async () => {
         if (apiFilters.value.type) {
             params.append('type', apiFilters.value.type);
         }
-        if (apiFilters.value.category_id) {
-            params.append('category_id', apiFilters.value.category_id);
+        // Append each category ID separately to create an array
+        if (apiFilters.value.category_id && apiFilters.value.category_id.length > 0) {
+            apiFilters.value.category_id.forEach((id) => {
+                params.append('category_id[]', String(id));
+            });
         }
         
         let url: string;
         if (props.group === 'date') {
-            const queryObj: Record<string, string> = {};
+            // For arrays, we need to build the query string manually
+            const queryParts: string[] = [];
             params.forEach((value, key) => {
-                queryObj[key] = value;
+                queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
             });
-            url = entriesIndex.url({ query: queryObj });
+            const queryString = queryParts.length > 0 ? '?' + queryParts.join('&') : '';
+            url = entriesIndex.url().split('?')[0] + queryString;
         } else {
             url = `/categories/grouped/entries?${params.toString()}`;
         }
@@ -625,17 +667,22 @@ const loadPreviousDays = async () => {
         if (apiFilters.value.type) {
             params.append('type', apiFilters.value.type);
         }
-        if (apiFilters.value.category_id) {
-            params.append('category_id', apiFilters.value.category_id);
+        // Append each category ID separately to create an array
+        if (apiFilters.value.category_id && apiFilters.value.category_id.length > 0) {
+            apiFilters.value.category_id.forEach((id) => {
+                params.append('category_id[]', String(id));
+            });
         }
         
         let url: string;
         if (props.group === 'date') {
-            const queryObj: Record<string, string> = {};
+            // For arrays, we need to build the query string manually
+            const queryParts: string[] = [];
             params.forEach((value, key) => {
-                queryObj[key] = value;
+                queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
             });
-            url = entriesIndex.url({ query: queryObj });
+            const queryString = queryParts.length > 0 ? '?' + queryParts.join('&') : '';
+            url = entriesIndex.url().split('?')[0] + queryString;
         } else {
             url = `/categories/grouped/entries?${params.toString()}`;
         }
@@ -904,7 +951,7 @@ const shouldShowGroupedEntries = computed(() => {
                     <DialogHeader>
                         <DialogTitle>Filter Entries</DialogTitle>
                     </DialogHeader>
-                    <form @submit.prevent="submitDateRange" class="flex flex-col gap-4">
+                    <form @submit.prevent="submitFilters" class="flex flex-col gap-4">
                         <div class="flex flex-col sm:flex-row gap-2">
                             <div class="flex-1">
                                 <Label for="date-from">Date From</Label>
@@ -925,11 +972,47 @@ const shouldShowGroupedEntries = computed(() => {
                                 />
                             </div>
                         </div>
+                        <div class="flex flex-col gap-2">
+                            <Label>Categories</Label>
+                            <div class="max-h-48 overflow-y-auto rounded-md border border-input p-3 space-y-2">
+                                <div
+                                    v-for="category in categories"
+                                    :key="category.id"
+                                    class="flex items-center space-x-2"
+                                >
+                                    <Checkbox
+                                        :id="`category-${category.id}`"
+                                        :checked="selectedCategories.includes(category.id)"
+                                        @update:checked="(checked: boolean) => {
+                                            if (checked) {
+                                                if (!selectedCategories.includes(category.id)) {
+                                                    selectedCategories.push(category.id);
+                                                }
+                                            } else {
+                                                selectedCategories = selectedCategories.filter(id => id !== category.id);
+                                            }
+                                        }"
+                                    />
+                                    <Label
+                                        :for="`category-${category.id}`"
+                                        class="text-sm font-normal cursor-pointer flex-1"
+                                    >
+                                        {{ category.name }}
+                                    </Label>
+                                </div>
+                                <div v-if="categories.length === 0" class="text-sm text-muted-foreground text-center py-2">
+                                    No categories available
+                                </div>
+                            </div>
+                            <p class="text-xs text-muted-foreground">
+                                Select one or more categories to filter entries. Leave all unchecked to show all categories.
+                            </p>
+                        </div>
                         <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                             <Button 
                                 type="button" 
                                 variant="outline"
-                                @click="filtersDialogOpen = false"
+                                @click="() => { resetDialogState(); filtersDialogOpen = false; }"
                                 class="w-full sm:w-auto"
                             >
                                 Cancel

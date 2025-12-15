@@ -48,8 +48,19 @@ class EntryController extends Controller
             $query->where('type', $request->type);
         }
 
-        if ($request->has('category_id') && $request->category_id !== '' && $request->category_id !== null) {
-            $query->where('category_id', $request->category_id);
+        // Handle multiple category IDs (can be array or single value)
+        if ($request->has('category_id')) {
+            $categoryIds = $request->input('category_id');
+            if (is_array($categoryIds) && !empty($categoryIds)) {
+                // Filter out empty values and ensure all are numeric
+                $categoryIds = array_filter(array_map('intval', $categoryIds));
+                if (!empty($categoryIds)) {
+                    $query->whereIn('category_id', $categoryIds);
+                }
+            } elseif ($categoryIds !== '' && $categoryIds !== null) {
+                // Single category ID (backward compatibility)
+                $query->where('category_id', $categoryIds);
+            }
         }
 
         // Get all entries (no pagination for grouped view)
@@ -71,7 +82,8 @@ class EntryController extends Controller
 
         // Group entries by date
         $grouped = $entries->groupBy(function (Entry $entry) {
-            return $entry->date->format('Y-m-d');
+            $date = $entry->date instanceof Carbon ? $entry->date : Carbon::parse($entry->date);
+            return $date->format('Y-m-d');
         });
 
         // Generate all dates in the range
@@ -102,11 +114,19 @@ class EntryController extends Controller
             $currentDate->addDay();
         }
 
+        // Return category_id as array for consistency
+        $categoryIdFilter = $request->input('category_id');
+        if (!is_array($categoryIdFilter) && $categoryIdFilter !== '' && $categoryIdFilter !== null) {
+            $categoryIdFilter = [$categoryIdFilter];
+        } elseif (!is_array($categoryIdFilter)) {
+            $categoryIdFilter = [];
+        }
+
         return response()->json([
             'groupedEntries' => $groupedEntries,
             'filters' => [
                 'type' => $request->get('type', ''),
-                'category_id' => $request->get('category_id', ''),
+                'category_id' => $categoryIdFilter,
                 'date_from' => $dateFrom,
                 'date_to' => $dateTo,
             ],
