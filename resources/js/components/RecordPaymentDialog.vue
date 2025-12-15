@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
+import { getCsrfToken } from '@/lib/utils';
 import {
     Dialog,
     DialogClose,
@@ -12,7 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Form } from '@inertiajs/vue3';
+import { store as storeEntryPayment } from '@/routes/entry-payments';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 
 interface Entry {
@@ -227,6 +228,84 @@ const close = () => {
     paymentDatepickerOpen.value = false;
 };
 
+// Form submission state
+const processing = ref(false);
+const errors = ref<Record<string, string>>({});
+
+const handleSubmit = async () => {
+    if (!props.entry) return;
+    
+    // Reset errors
+    errors.value = {};
+    
+    // Validate required fields
+    if (!paymentAmount.value || parseFloat(paymentAmount.value) <= 0) {
+        errors.value.amount = 'Amount is required and must be greater than 0.';
+        return;
+    }
+    
+    if (!paymentDate.value) {
+        errors.value.date = 'Date is required.';
+        return;
+    }
+    
+    processing.value = true;
+    
+    try {
+        const formData = {
+            entry_id: props.entry.id,
+            amount: parseFloat(paymentAmount.value),
+            date: paymentDate.value,
+            notes: paymentNotes.value || null,
+        };
+        
+        // Get clean URL without query parameters
+        const url = storeEntryPayment.url();
+        const cleanUrl = url.split('?')[0];
+        
+        // Get CSRF token
+        const csrfToken = getCsrfToken();
+        if (!csrfToken) {
+            errors.value._general = 'CSRF token not found. Please refresh the page.';
+            processing.value = false;
+            return;
+        }
+        
+        const response = await fetch(cleanUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-XSRF-TOKEN': csrfToken,
+            },
+            body: JSON.stringify(formData),
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            // Handle validation errors
+            if (response.status === 422 && data.errors) {
+                errors.value = data.errors;
+                return;
+            }
+            throw new Error(data.message || `Failed to record payment: ${response.status}`);
+        }
+        
+        // Success - show confirmation and close
+        paymentAmount.value = '';
+        paymentDate.value = formatDateLocal(new Date());
+        paymentNotes.value = '';
+        close();
+    } catch (error) {
+        console.error('Error recording payment:', error);
+        errors.value._general = error instanceof Error ? error.message : 'An error occurred while recording the payment.';
+    } finally {
+        processing.value = false;
+    }
+};
+
 onMounted(() => {
     document.addEventListener('mousedown', handlePaymentDatepickerClickOutside);
 });
@@ -264,21 +343,11 @@ onUnmounted(() => {
                 </div>
             </div>
             
-            <Form
+            <form
                 v-if="entry"
-                :key="`payment-${entry.id}`"
-                :action="`/entry-payments`"
-                method="post"
-                :preserve-scroll="true"
-                @success="close"
+                @submit.prevent="handleSubmit"
                 class="grid gap-4 sm:grid-cols-2"
-                v-slot="{ errors, processing }"
             >
-                <input
-                    type="hidden"
-                    name="entry_id"
-                    :value="entry.id"
-                />
 
                 <div class="relative grid gap-2 sm:col-span-1">
                     <Label for="payment-amount">Amount</Label>
@@ -287,7 +356,6 @@ onUnmounted(() => {
                         type="number"
                         step="0.01"
                         min="0.01"
-                        name="amount"
                         v-model="paymentAmount"
                         required
                         placeholder="0.00"
@@ -310,11 +378,6 @@ onUnmounted(() => {
                             placeholder="Select date"
                             autocomplete="off"
                             readonly
-                        />
-                        <input
-                            type="hidden"
-                            name="date"
-                            :value="paymentDate"
                         />
                         <div
                             ref="paymentDatepickerRef"
@@ -420,13 +483,16 @@ onUnmounted(() => {
                     <Label for="payment-notes">Notes (optional)</Label>
                     <textarea
                         id="payment-notes"
-                        name="notes"
                         v-model="paymentNotes"
                         rows="3"
                         placeholder="Add notes about this payment..."
                         class="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     ></textarea>
                     <InputError :message="errors.notes" />
+                </div>
+
+                <div v-if="errors._general" class="sm:col-span-2">
+                    <InputError :message="errors._general" />
                 </div>
 
                 <DialogFooter class="sm:col-span-2">
@@ -446,7 +512,7 @@ onUnmounted(() => {
                         {{ processing ? 'Recording...' : 'Record Payment' }}
                     </Button>
                 </DialogFooter>
-            </Form>
+            </form>
         </DialogContent>
     </Dialog>
 </template>

@@ -10,8 +10,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { entries as entriesRoute } from '@/routes';
-import { destroy } from '@/routes/entries';
+import { destroy, index as entriesIndex } from '@/routes/entries';
 import { type BreadcrumbItem } from '@/types';
+import { getCsrfToken } from '@/lib/utils';
 import { Head, router } from '@inertiajs/vue3';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { CreditCard, Filter, CheckCircle } from 'lucide-vue-next';
@@ -178,7 +179,6 @@ const getCardColorClass = (entry: Entry): string => {
 };
 
 const getAmountColorByAmount = (amount: number) => {
-    console.log(amount);
     return amount > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
 };
 
@@ -264,9 +264,21 @@ const handleDelete = async () => {
     if (!entryToDelete.value) return;
     
     try {
+        // Get CSRF token
+        const csrfToken = getCsrfToken();
+        if (!csrfToken) {
+            console.error('CSRF token not found');
+            return;
+        }
+        
         const response = await fetch(destroy.url({ entry: entryToDelete.value.id }), {
             method: 'DELETE',
-            headers: { Accept: 'application/json' },
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-XSRF-TOKEN': csrfToken,
+            },
+            credentials: 'include',
         });
 
         if (!response.ok) {
@@ -351,9 +363,25 @@ const fetchGroupedEntries = async () => {
             params.append('category_id', apiFilters.value.category_id);
         }
 
-        const url = `/entries/grouped/${props.group}${params.toString() ? '?' + params.toString() : ''}`;
+        let url: string;
+        if (props.group === 'date') {
+            // Use API entries endpoint for date grouping
+            const queryObj: Record<string, string> = {};
+            params.forEach((value, key) => {
+                queryObj[key] = value;
+            });
+            url = entriesIndex.url({ query: queryObj });
+        } else {
+            // Use category grouped endpoint for category grouping
+            url = `/categories/grouped/entries${params.toString() ? '?' + params.toString() : ''}`;
+        }
+
         const response = await fetch(url, {
-            headers: { Accept: 'application/json' },
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'include',
         });
 
         if (!response.ok) {
@@ -499,9 +527,22 @@ const loadNextDays = async () => {
             params.append('category_id', apiFilters.value.category_id);
         }
         
-        const url = `/entries/grouped/${props.group}?${params.toString()}`;
+        let url: string;
+        if (props.group === 'date') {
+            const queryObj: Record<string, string> = {};
+            params.forEach((value, key) => {
+                queryObj[key] = value;
+            });
+            url = entriesIndex.url({ query: queryObj });
+        } else {
+            url = `/categories/grouped/entries?${params.toString()}`;
+        }
         const response = await fetch(url, {
-            headers: { Accept: 'application/json' },
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'include',
         });
         
         if (!response.ok) {
@@ -588,9 +629,22 @@ const loadPreviousDays = async () => {
             params.append('category_id', apiFilters.value.category_id);
         }
         
-        const url = `/entries/grouped/${props.group}?${params.toString()}`;
+        let url: string;
+        if (props.group === 'date') {
+            const queryObj: Record<string, string> = {};
+            params.forEach((value, key) => {
+                queryObj[key] = value;
+            });
+            url = entriesIndex.url({ query: queryObj });
+        } else {
+            url = `/categories/grouped/entries?${params.toString()}`;
+        }
         const response = await fetch(url, {
-            headers: { Accept: 'application/json' },
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'include',
         });
         
         if (!response.ok) {

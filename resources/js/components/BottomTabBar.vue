@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { categories, dashboard } from '@/routes';
-import entriesRoutes from '@/routes/entries';
+import { entries, dashboard } from '@/routes';
+import { index as entriesIndex } from '@/routes/entries';
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import { Home, Wallet, Tag, Settings } from 'lucide-vue-next';
@@ -19,12 +19,12 @@ const tabs: TabItem[] = [
     },
     {
         title: 'Entries',
-        href: entriesRoutes.index({ group: 'date' }).url,
+        href: entries().url,
         icon: Wallet,
     },
     {
         title: 'Categories',
-        href: entriesRoutes.index({ group: 'category' }).url,
+        href: '#',
         icon: Tag,
     },
     {

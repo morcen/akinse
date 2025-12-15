@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
+import { getCsrfToken } from '@/lib/utils';
 import {
     Dialog,
     DialogClose,
@@ -13,7 +14,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { update as updateEntry } from '@/routes/entries';
-import { Form } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 
 interface Entry {
@@ -296,6 +296,94 @@ const handleDelete = () => {
     close();
 };
 
+// Form submission state
+const processing = ref(false);
+const errors = ref<Record<string, string>>({});
+
+const handleSubmit = async () => {
+    if (!props.entry) return;
+    
+    // Reset errors
+    errors.value = {};
+    
+    // Validate required fields
+    if (!formAmount.value || parseFloat(formAmount.value) <= 0) {
+        errors.value.amount = 'Amount is required and must be greater than 0.';
+        return;
+    }
+    
+    if (!categoryInput.value.trim() && !selectedCategoryId.value) {
+        errors.value.category_name = 'Category is required.';
+        return;
+    }
+    
+    if (!dateInput.value) {
+        errors.value.date = 'Date is required.';
+        return;
+    }
+    
+    processing.value = true;
+    
+    try {
+        const formData: Record<string, any> = {
+            type: formType.value,
+            amount: parseFloat(formAmount.value),
+            date: dateInput.value,
+            description: formDescription.value || null,
+        };
+        
+        if (selectedCategoryId.value) {
+            formData.category_id = selectedCategoryId.value;
+        } else {
+            formData.category_name = categoryInput.value.trim();
+        }
+        
+        // Get clean URL without query parameters to avoid method spoofing
+        // Construct URL directly to avoid any route helper quirks
+        const entryId = props.entry.id;
+        const cleanUrl = `/entries/${entryId}`;
+        
+        // Get CSRF token
+        const csrfToken = getCsrfToken();
+        if (!csrfToken) {
+            errors.value._general = 'CSRF token not found. Please refresh the page.';
+            processing.value = false;
+            return;
+        }
+        
+        const response = await fetch(cleanUrl, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-XSRF-TOKEN': csrfToken,
+            },
+            body: JSON.stringify(formData),
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            // Handle validation errors
+            if (response.status === 422 && data.errors) {
+                errors.value = data.errors;
+                return;
+            }
+            throw new Error(data.message || `Failed to update entry: ${response.status}`);
+        }
+        
+        // Success - show confirmation and close
+        clearCategory();
+        close();
+    } catch (error) {
+        console.error('Error updating entry:', error);
+        errors.value._general = error instanceof Error ? error.message : 'An error occurred while updating the entry.';
+    } finally {
+        processing.value = false;
+    }
+};
+
 onMounted(() => {
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('mousedown', handleCategoryDropdownClickOutside);
@@ -316,21 +404,15 @@ onUnmounted(() => {
                     Update the entry details
                 </DialogDescription>
             </DialogHeader>
-            <Form
+            <form
                 v-if="entry"
-                :key="`edit-${entry.id}`"
-                v-bind="updateEntry.form({ entry: entry.id })"
-                :reset-on-success="false"
-                :preserve-scroll="true"
-                @success="() => { clearCategory(); close(); }"
+                @submit.prevent="handleSubmit"
                 class="grid gap-4 sm:grid-cols-2"
-                v-slot="{ errors, processing }"
             >
                 <div class="grid gap-2 sm:col-span-1">
                     <Label for="edit-type">Type</Label>
                     <select
                         id="edit-type"
-                        name="type"
                         v-model="formType"
                         required
                         class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -349,7 +431,6 @@ onUnmounted(() => {
                         type="number"
                         step="0.01"
                         min="0"
-                        name="amount"
                         v-model="formAmount"
                         required
                         placeholder="0.00"
@@ -370,18 +451,6 @@ onUnmounted(() => {
                             required
                             placeholder="Type to search or create new category"
                             autocomplete="off"
-                        />
-                        <input
-                            v-if="selectedCategoryId"
-                            type="hidden"
-                            name="category_id"
-                            :value="selectedCategoryId"
-                        />
-                        <input
-                            v-else
-                            type="hidden"
-                            name="category_name"
-                            :value="categoryInput.trim()"
                         />
                         <div
                             ref="categoryDropdownRef"
@@ -419,11 +488,6 @@ onUnmounted(() => {
                             placeholder="Select date"
                             autocomplete="off"
                             readonly
-                        />
-                        <input
-                            type="hidden"
-                            name="date"
-                            :value="dateInput"
                         />
                         <div
                             ref="datepickerRef"
@@ -529,13 +593,16 @@ onUnmounted(() => {
                     <Label for="edit-description">Description (optional)</Label>
                     <textarea
                         id="edit-description"
-                        name="description"
                         v-model="formDescription"
                         rows="3"
                         placeholder="Add a description for this entry..."
                         class="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     ></textarea>
                     <InputError :message="errors.description" />
+                </div>
+
+                <div v-if="errors._general" class="sm:col-span-2">
+                    <InputError :message="errors._general" />
                 </div>
 
                 <DialogFooter class="sm:col-span-2">
@@ -567,7 +634,7 @@ onUnmounted(() => {
                         </div>
                     </div>
                 </DialogFooter>
-            </Form>
+            </form>
         </DialogContent>
     </Dialog>
 </template>
