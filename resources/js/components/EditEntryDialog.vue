@@ -338,10 +338,9 @@ const handleSubmit = async () => {
             formData.category_name = categoryInput.value.trim();
         }
         
-        // Get clean URL without query parameters to avoid method spoofing
-        // Construct URL directly to avoid any route helper quirks
+        // Use the route helper to get the correct API endpoint
         const entryId = props.entry.id;
-        const cleanUrl = `/entries/${entryId}`;
+        const cleanUrl = updateEntry.url({ entry: entryId });
         
         // Get CSRF token
         const csrfToken = getCsrfToken();
